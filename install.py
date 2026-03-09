@@ -137,12 +137,12 @@ def validate_features(
 # ---------------------------------------------------------------------------
 
 def _find_local_whl() -> Path | None:
-    """Return the most recent .whl in wings_engine_patch/dist/, if present."""
+    """Return the most recently built .whl in wings_engine_patch/dist/, if present."""
     dist_dir = Path(__file__).parent / "wings_engine_patch" / "dist"
     if dist_dir.exists():
-        whls = sorted(dist_dir.glob("*.whl"))
+        whls = list(dist_dir.glob("*.whl"))
         if whls:
-            return whls[-1]
+            return max(whls, key=lambda p: p.stat().st_mtime)
     return None
 
 
@@ -194,7 +194,6 @@ def _print_env_hint(engine_name: str, version: str, features: list, dry_run: boo
 def check_installed(engine_name: str, version: str, features: list) -> bool:
     """Verify that wings_engine_patch is installed and the requested engine/features
     are registered in the patch registry."""
-    ok = True
     print(f"[wings-accel] Checking {engine_name}@{version} features: {features}")
 
     # 1. package installed?
@@ -250,7 +249,7 @@ def check_installed(engine_name: str, version: str, features: list) -> bool:
         else:
             print(f"  ⚠️  Feature '{feat}' not in loaded spec (may be loaded lazily)")
 
-    return ok
+    return True
 
 
 # ---------------------------------------------------------------------------

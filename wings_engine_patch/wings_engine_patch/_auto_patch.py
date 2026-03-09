@@ -11,9 +11,8 @@ try:
         from .registry import enable
         
         try:
-            # Expected format: 
-            # 1. Simple: {"vllm_ascend": ["soft_fp8", ...], ...}
-            # 2. Versioned: {"vllm_ascend": {"version": "0.12.0", "features": ["soft_fp8"]}, ...}
+            # Expected format (versioned dict):
+            # {"vllm_ascend": {"version": "0.12.0", "features": ["soft_fp8"]}, ...}
             options = json.loads(env_options)
             
             if isinstance(options, dict):
