@@ -1,0 +1,2 @@
+1. supported_features.json 要成为安装文件的一部分
+2. CVE？是否需要维护旧版本的CVE？是否支持CVE安装未验证版本？
