@@ -73,7 +73,6 @@ class AscendW4A16NVFP4LinearMethod:
 
     def process_weights_after_loading(self, layer):
         weight_data = fp4_ops.reformat_fp4_weight(layer.weight.data)
-        # weight_data = layer.weight.data
         weight_scale_data = layer.weight_scale.data.view(torch.uint8)
         weight_scale_2_data = layer.weight_scale_2.data.to(torch.bfloat16)
         del layer.input_scale

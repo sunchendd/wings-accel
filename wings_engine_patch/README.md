@@ -13,18 +13,29 @@ Wings Engine Patch is a lightweight, dynamic patching framework designed to inje
 
 ## Installation
 
-This project uses a custom build process to ensure the entry-point hook (`wings_engine_patch.pth`) is correctly installed.
+This project uses a custom build process to inject a `.pth` entry-point hook into the wheel.
 
-1.  **Build the Wheel**:
-    ```bash
-    python3 build_wheel.py
-    ```
-    This will generate a `.whl` file in the `dist/` directory.
+**Recommended — use the top-level Makefile from the repository root:**
 
-2.  **Install**:
-    ```bash
-    pip install dist/wings_engine_patch-*.whl --force-reinstall
-    ```
+```bash
+make dev-setup   # first time: create .venv + install build/test deps
+make build       # build the wheel (output: dist/*.whl)
+make install     # build + pip install into current environment
+```
+
+**Or use the install CLI directly:**
+
+```bash
+python install.py --features '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
+```
+
+**Manual (advanced):**
+
+```bash
+cd wings_engine_patch
+python build_wheel.py          # generates dist/wings_engine_patch-*.whl
+pip install dist/wings_engine_patch-*.whl --force-reinstall
+```
 
 ## Usage
 
