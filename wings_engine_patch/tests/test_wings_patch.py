@@ -7,17 +7,18 @@ from unittest.mock import patch, MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from wings_engine_patch.registry import enable
-import wings_engine_patch.registry as registry
+import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch
+
 
 class TestWingsPatchMechanism(unittest.TestCase):
     def setUp(self):
         # Reset dummy patch state
         dummy_patch.reset()
-        
-        # Save original registry to restore later
-        self.original_registry = registry._registered_patches.copy()
-        
+
+        # Save original registry to restore later (lives in registry_v1)
+        self.original_registry = registry_v1._registered_patches.copy()
+
         # Define a mock registry structure for testing
         # Structure: Engine -> Version -> IsDefault/Features
         self.mock_registry = {
@@ -29,7 +30,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
                     }
                 },
                 '2.0.0': {
-                    'is_default': True, # This is the DEFAULT version
+                    'is_default': True,  # This is the DEFAULT version
                     'features': {
                         'feature_no_match': [dummy_patch.mock_patch_func],
                         'feature_w_default': [dummy_patch.mock_patch_func]
@@ -37,12 +38,12 @@ class TestWingsPatchMechanism(unittest.TestCase):
                 }
             }
         }
-        # Inject mock registry
-        registry._registered_patches = self.mock_registry
+        # Inject mock registry into registry_v1 where enable() reads it
+        registry_v1._registered_patches = self.mock_registry
 
     def tearDown(self):
         # Restore registry
-        registry._registered_patches = self.original_registry
+        registry_v1._registered_patches = self.original_registry
 
     def test_01_version_exact_match(self):
         """Test that a patch is applied when the version matches exactly."""

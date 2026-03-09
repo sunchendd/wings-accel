@@ -5,26 +5,6 @@ import wrapt
 from typing import Optional, List
 from .. import fp8_ops
 
-def patch_unified_apply_mlp(fn, instance, args, kwargs):
-    # Extract arguments explicitly to handle both positional and keyword invocations
-    # Function signature: unified_apply_mlp(hidden_states, w1, w2, group_list, w1_scale=None, w2_scale=None, dynamic_scale=None, group_list_type=1, w1_scale_bias=None, w2_scale_bias=None, w1_offset=None, w2_offset=None, topk_scales=None, with_quant=False, fusion=False, need_trans=True, dynamic_eplb=False)
-    # We are adding use_fp8_w8a16=False at the end
-    
-    # Simple check if 'use_fp8_w8a16' is in kwargs and is True
-    if kwargs.get('use_fp8_w8a16', False):
-        use_fp8_w8a16 = kwargs.pop('use_fp8_w8a16')
-        
-        # If fp8 is enabled, we need to handle the quantization logic here, skipping the original implementation's checks that might not account for fp8 yet if we just pass through
-        # But wait, we want to monkey patch the implementation logic, but unified_apply_mlp delegates to quant_apply_mlp if with_quant is True.
-        # The prompt shows both unified_apply_mlp and quant_apply_mlp were modified. 
-        # Using a wrapper here is tricky if we want to change signature.
-        # The best way for monkey patching usually is to replace the function entirely if the logic change is significant and internal.
-        pass
-
-    return fn(*args, **kwargs)
-
-# Since we need to modify the internal logic of quant_apply_mlp and unified_apply_mlp to support the new argument and logic, replacing them is cleaner.
-
 def quant_apply_mlp_new(hidden_states: torch.Tensor,
                     w1: list[torch.Tensor],
                     w1_scale: list[torch.Tensor],
@@ -66,7 +46,7 @@ def quant_apply_mlp_new(hidden_states: torch.Tensor,
             group_list_type)
         return hidden_states
 
-    # Fallback to original logic (copied structure)
+    # Fallback to original logic
     if w1_offset is not None:
         unquantized_hidden_states = hidden_states
         quantized_hidden_states = None
@@ -89,21 +69,7 @@ def quant_apply_mlp_new(hidden_states: torch.Tensor,
         weight_prefetch_method.maybe_prefetch_moe_weight_postprocess(
             hidden_states)
     is_mc2 = get_forward_context().moe_comm_type == MoECommType.MC2
-    
-    # ... Only copying essential parts for context, but since we are replacing, we need full logic.
-    # However, since we don't want to copy-paste the entire original function which might change, 
-    # and we only need to handle the new `use_fp8_w8a16` case,
-    # we can try to call the original function if use_fp8_w8a16 is False.
-    # But wait, the original function signature doesn't accept `use_fp8_w8a16`.
-    # So we handle our case, and if not, call original... wait, we are REPLACING the original.
-    # So we need to call the OLD original. Wrapt allows this if we hook.
-    # But here we are defining a replacement function.
-    
-    # Let's try to get the original function from the module if we are doing a replacement.
-    # But standard replacement overwrites it.
-    
-    # Strategy: We will duplicate the logic since the patch needs to inject code at the beginning.
-    
+
     if w1_scale_bias is None and w1_offset is None and is_mc2:
         if _custom_gmm_swiglu_enabled(fusion, dynamic_eplb):
              hidden_states, swiglu_out_scale, _ = (

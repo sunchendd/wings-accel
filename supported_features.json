@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-01-23",
+  "updated_at": "2026-03-09",
   "description": "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
   "engines": {
     "vllm_ascend": {
@@ -11,6 +11,9 @@
           "features": {
             "soft_fp8": {
               "description": "Software simulation for FP8 quantization logic"
+            },
+            "soft_fp4": {
+              "description": "Software simulation for FP4 (NV-style W4A16NVFP4) quantization logic"
             }
           }
         }

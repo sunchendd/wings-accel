@@ -131,7 +131,7 @@ def _expand_features_by_shared_patches(ver_specs, selected_features):
 
 
 def enable(inference_engine: str, features: List[str], version: str):
-    print(f"Enabling patches for inference_engine={inference_engine}, version={version}, features={features}")
+    print(f"Enabling patches for inference_engine={inference_engine}, version={version}, features={features}", file=sys.stderr)
     
     engine_specs = _registered_patches.get(inference_engine)
     if not engine_specs:

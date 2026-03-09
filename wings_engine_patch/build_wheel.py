@@ -1,4 +1,7 @@
 import os
+import sys
+import hashlib
+import base64
 import shutil
 import glob
 import subprocess
@@ -13,8 +16,8 @@ def build_wheel():
     if os.path.exists("wings_engine_patch.egg-info"):
         shutil.rmtree("wings_engine_patch.egg-info")
 
-    # Build the wheel
-    subprocess.check_call(["python3", "setup.py", "bdist_wheel"])
+    # Build the wheel using current interpreter (supports venv)
+    subprocess.check_call([sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", "dist"])
 
     # Find the built wheel
     whl_files = glob.glob("dist/*.whl")
@@ -27,8 +30,32 @@ def build_wheel():
     # For a pure python package, it's usually 'purelib'.
     # We need to construct the path 'wings_engine_patch-{version}.data/purelib/wings_engine_patch.pth'
     
-    # Get version from setup.py (hardcoded here based on previous file content)
-    version = "1.0.0" 
+    # Get version dynamically from pyproject.toml (primary), fallback to setup.py via AST
+    version = "1.0.0"  # fallback
+    pyproject_path = "pyproject.toml"
+    if os.path.exists(pyproject_path):
+        try:
+            import tomllib  # Python 3.11+
+        except ImportError:
+            try:
+                import tomli as tomllib  # type: ignore
+            except ImportError:
+                tomllib = None
+
+        if tomllib:
+            with open(pyproject_path, "rb") as tf:
+                pyproject = tomllib.load(tf)
+            version = pyproject.get("project", {}).get("version", version)
+        else:
+            # Plain string search fallback for environments without tomllib/tomli
+            with open(pyproject_path) as tf:
+                for line in tf:
+                    line = line.strip()
+                    if line.startswith("version") and "=" in line:
+                        candidate = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        if candidate:
+                            version = candidate
+                            break
     package_name = "wings_engine_patch"
     data_dir = f"{package_name}-{version}.data"
     destination_path = f"{data_dir}/purelib/wings_engine_patch.pth"
@@ -37,18 +64,29 @@ def build_wheel():
     # It's safer to read all files, and write a new zip.
     
     new_whl_path = whl_path.replace(".whl", "_repacked.whl")
-    
+    pth_content = "import wings_engine_patch._auto_patch\n"
+    pth_bytes = pth_content.encode("utf-8")
+    pth_hash = "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(pth_bytes).digest()).rstrip(b"=").decode("ascii")
+
     with zipfile.ZipFile(whl_path, 'r') as zin:
-        with zipfile.ZipFile(new_whl_path, 'w') as zout:
-            zout.comment = zin.comment # preserve the comment
+        record_name = next(n for n in zin.namelist() if n.endswith("/RECORD"))
+        old_record = zin.read(record_name).decode("utf-8")
+        with zipfile.ZipFile(new_whl_path, 'w', compression=zipfile.ZIP_DEFLATED) as zout:
+            zout.comment = zin.comment
             for item in zin.infolist():
+                if item.filename == record_name:
+                    continue  # will rewrite RECORD below
                 zout.writestr(item, zin.read(item.filename))
-            
+
             # Add wings_engine_patch.pth
             print(f"Adding wings_engine_patch.pth to {destination_path}")
-            # Dynamically write the content of .pth file
-            pth_content = "import wings_engine_patch._auto_patch\n"
-            zout.writestr(destination_path, pth_content)
+            zout.writestr(destination_path, pth_bytes)
+
+            # Update RECORD with new entry + pth entry
+            new_record = old_record.rstrip("\n")
+            new_record += f"\n{destination_path},{pth_hash},{len(pth_bytes)}\n"
+            new_record += f"{record_name},,\n"
+            zout.writestr(record_name, new_record)
 
     # Replace original wheel
     os.remove(whl_path)

@@ -1,15 +1,5 @@
-from setuptools import setup, find_packages
+# Retained for backward compatibility with tools that do not support PEP 517/621.
+# All project metadata is declared in pyproject.toml.
+from setuptools import setup
 
-setup(
-    name="wings_engine_patch",
-    version="1.0.0",
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "Operating System :: OS Independent",
-    ],
-    python_requires='>=3.6',
-    install_requires=[
-        "wrapt",
-    ],
-)
+setup()

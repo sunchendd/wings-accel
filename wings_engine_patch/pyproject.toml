@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wings_engine_patch"
+version = "1.0.0"
+description = "Runtime monkey-patch framework for vLLM and vLLM-Ascend inference engines"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Proprietary" }
+keywords = ["vllm", "ascend", "npu", "inference", "patch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+]
+dependencies = ["wrapt"]
+
+[project.optional-dependencies]
+# vllm (x86/GPU) — currently pure Python patch, reserved for future engine-specific deps
+vllm        = []
+# vllm-ascend (Huawei Ascend NPU) — currently pure Python patch, reserved for torch-npu etc.
+vllm_ascend = []
+# Install all engine extras
+all = [
+    "wings_engine_patch[vllm]",
+    "wings_engine_patch[vllm_ascend]",
+]
+# Development and test dependencies
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "build",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wings_engine_patch*"]
+
+[tool.setuptools.package-data]
+wings_engine_patch = ["supported_features.json"]
