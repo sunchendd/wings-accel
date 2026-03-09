@@ -23,6 +23,9 @@ build/
 htmlcov/
 coverage.xml
 
+# Ascend NPU runtime artifacts
+fusion_result.json
+
 # mypy / type checkers
 .mypy_cache/
 .dmypy.json
