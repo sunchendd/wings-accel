@@ -13,7 +13,7 @@ import io
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from install import validate_schema, resolve_version, validate_features
+from install import validate_schema, resolve_version, validate_features, main as install_main
 import wings_engine_patch.registry_v1 as registry_v1
 
 
@@ -255,6 +255,44 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):
             self._ver_specs_with_shared_patch(), ["feature_x", "feature_y"]
         )
         self.assertEqual(result, {"feature_x", "feature_y"})
+
+
+# ---------------------------------------------------------------------------
+# Unknown key warning in --features config
+# ---------------------------------------------------------------------------
+
+class TestUnknownEngineConfigKeys(unittest.TestCase):
+    """
+    When --features JSON contains unexpected keys (e.g. 'feature' instead of
+    'features'), a warning should be printed to stderr so the user notices the typo.
+    This test exercises the warning path indirectly by simulating the main() argument
+    parsing with patched sys.argv.
+    """
+
+    def _run_main_capture_stderr(self, features_json: str) -> str:
+        import unittest.mock as mock
+        captured = io.StringIO()
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with mock.patch("sys.stderr", captured):
+                try:
+                    install_main()
+                except SystemExit:
+                    pass
+        return captured.getvalue()
+
+    def test_typo_feature_key_warns(self):
+        # 'feature' instead of 'features' — should warn
+        output = self._run_main_capture_stderr(
+            '{"vllm_ascend": {"version": "0.12.0rc1", "feature": ["soft_fp8"]}}'
+        )
+        self.assertIn("unknown keys", output.lower())
+        self.assertIn("feature", output)
+
+    def test_correct_keys_no_warning(self):
+        output = self._run_main_capture_stderr(
+            '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
+        )
+        self.assertNotIn("unknown keys", output.lower())
 
 
 if __name__ == "__main__":

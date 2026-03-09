@@ -376,6 +376,15 @@ Examples:
         requested_version = config.get("version")
         requested_features = config.get("features", [])
 
+        _KNOWN_ENGINE_CONFIG_KEYS = {"version", "features"}
+        unknown_keys = set(config.keys()) - _KNOWN_ENGINE_CONFIG_KEYS
+        if unknown_keys:
+            print(
+                f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
+                f"'{engine_name}'. Expected keys: {sorted(_KNOWN_ENGINE_CONFIG_KEYS)}.",
+                file=sys.stderr,
+            )
+
         if not requested_version:
             print(
                 f"[wings-accel] Error: 'version' is required for engine '{engine_name}'.",
