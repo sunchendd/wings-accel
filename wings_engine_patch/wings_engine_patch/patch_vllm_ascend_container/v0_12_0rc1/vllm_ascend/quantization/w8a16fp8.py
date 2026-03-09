@@ -186,7 +186,7 @@ class AscendW8A16FP8FusedMoEMethod:
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
         is_prefill: bool = True,
-        enable_force_load_balance: bool = True,
+        enable_force_load_balance: bool = False,
         log2phy: torch.Tensor = None,
         global_redundant_expert_num: int = 0,
         shared_experts: Optional[Any] = None,
