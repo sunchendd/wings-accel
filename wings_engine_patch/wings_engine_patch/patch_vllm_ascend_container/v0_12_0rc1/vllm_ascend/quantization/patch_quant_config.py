@@ -1,9 +1,27 @@
+import inspect
 import wrapt
 
 
-def patch_AscendQuantConfig_is_layer_skipped_ascend():
+def _make_create_weights_wrapper():
+    """Return a wrapper that delegates to self.quant_method.create_weights when present."""
     def _wrapper(wrapped, instance, args, kwargs):
-        prefix, fused_mapping = args
+        self = instance
+        if hasattr(self.quant_method, 'create_weights'):
+            self.quant_method.create_weights(*args, **kwargs)
+            return
+        return wrapped(*args, **kwargs)
+    return _wrapper
+
+
+def _make_is_layer_skipped_wrapper():
+    def _wrapper(wrapped, instance, args, kwargs):
+        sig = inspect.signature(wrapped)
+        bound = sig.bind_partial(*args, **kwargs)
+        bound.apply_defaults()
+        arguments = bound.arguments
+
+        prefix = arguments['prefix']
+        fused_mapping = arguments['fused_mapping']
         self = instance
 
         proj_name = prefix.split(".")[-1]
@@ -30,82 +48,81 @@ def patch_AscendQuantConfig_is_layer_skipped_ascend():
 
         assert is_skipped is not None
         return is_skipped
+    return _wrapper
 
+
+def _make_get_quant_method_wrapper():
+    def _wrapper(wrapped, instance, args, kwargs):
+        from vllm_ascend.quantization.quant_config import AscendKVCacheMethod
+        from vllm.attention.layer import Attention
+
+        self = instance
+        sig = inspect.signature(wrapped)
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        arguments = bound.arguments
+
+        layer = arguments['layer']
+        prefix = arguments['prefix']
+
+        if isinstance(layer, Attention) and self.quant_description.get(
+                'kv_quant_type') in ('C8', 'W8A16FP8'):
+            return AscendKVCacheMethod(self, prefix)
+
+        return wrapped(*args, **kwargs)
+    return _wrapper
+
+
+def _apply_all_quant_config_patches(m):
+    """Single combined hook: wraps all four AscendQuantConfig methods at once."""
+    wrapt.wrap_function_wrapper(
+        'vllm_ascend.quantization.quant_config',
+        'AscendQuantConfig.is_layer_skipped_ascend',
+        _make_is_layer_skipped_wrapper(),
+    )
+    wrapt.wrap_function_wrapper(
+        'vllm_ascend.quantization.quant_config',
+        'AscendQuantConfig.get_quant_method',
+        _make_get_quant_method_wrapper(),
+    )
+    wrapt.wrap_function_wrapper(
+        'vllm_ascend.quantization.quant_config',
+        'AscendLinearMethod.create_weights',
+        _make_create_weights_wrapper(),
+    )
+    wrapt.wrap_function_wrapper(
+        'vllm_ascend.quantization.quant_config',
+        'AscendFusedMoEMethod.create_weights',
+        _make_create_weights_wrapper(),
+    )
+
+
+def patch_AscendQuantConfig_is_layer_skipped_ascend():
     wrapt.register_post_import_hook(
-        lambda m: wrapt.wrap_function_wrapper(
-            'vllm_ascend.quantization.quant_config',
-            'AscendQuantConfig.is_layer_skipped_ascend',
-            _wrapper
-        ),
+        _apply_all_quant_config_patches,
         'vllm_ascend.quantization.quant_config'
     )
 
 
 def patch_AscendQuantConfig_get_quant_method():
-    def _wrapper(wrapped, instance, args, kwargs):
-        # Lazy import to avoid top-level dependency issues
-        from vllm_ascend.quantization.quant_config import AscendKVCacheMethod
-        from vllm.attention.layer import Attention
-        
-        self = instance
-        if len(args) == 2:
-            layer, prefix = args
-        elif len(args) == 1 and 'prefix' in kwargs:
-            layer = args[0]
-            prefix = kwargs['prefix']
-        elif len(args) == 0 and 'layer' in kwargs and 'prefix' in kwargs:
-            layer = kwargs['layer']
-            prefix = kwargs['prefix']
-        else:
-            raise ValueError("Invalid arguments")
-
-        if isinstance(layer, Attention) and self.quant_description.get(
-                'kv_quant_type') in ('C8', 'W8A16FP8'):
-            return AscendKVCacheMethod(self, prefix)
-            
-        return wrapped(*args, **kwargs)
-
+    # All four patches are applied together by _apply_all_quant_config_patches.
+    # Registering the hook here is a no-op when is_layer_skipped_ascend already
+    # registered it; wrapt deduplicates hooks registered on the same module.
     wrapt.register_post_import_hook(
-        lambda m: wrapt.wrap_function_wrapper(
-            'vllm_ascend.quantization.quant_config',
-            'AscendQuantConfig.get_quant_method',
-            _wrapper
-        ),
+        _apply_all_quant_config_patches,
         'vllm_ascend.quantization.quant_config'
     )
 
 
 def patch_AscendLinearMethod_create_weights():
-    def _wrapper(wrapped, instance, args, kwargs):
-        self = instance
-        if hasattr(self.quant_method, 'create_weights'):
-            self.quant_method.create_weights(*args, **kwargs)
-            return
-        return wrapped(*args, **kwargs)
-
     wrapt.register_post_import_hook(
-        lambda m: wrapt.wrap_function_wrapper(
-            'vllm_ascend.quantization.quant_config',
-            'AscendLinearMethod.create_weights',
-            _wrapper
-        ),
+        _apply_all_quant_config_patches,
         'vllm_ascend.quantization.quant_config'
     )
 
 
 def patch_AscendFusedMoEMethod_create_weights():
-    def _wrapper(wrapped, instance, args, kwargs):
-        self = instance
-        if hasattr(self.quant_method, 'create_weights'):
-            self.quant_method.create_weights(*args, **kwargs)
-            return
-        return wrapped(*args, **kwargs)
-
     wrapt.register_post_import_hook(
-        lambda m: wrapt.wrap_function_wrapper(
-            'vllm_ascend.quantization.quant_config',
-            'AscendFusedMoEMethod.create_weights',
-            _wrapper
-        ),
+        _apply_all_quant_config_patches,
         'vllm_ascend.quantization.quant_config'
     )

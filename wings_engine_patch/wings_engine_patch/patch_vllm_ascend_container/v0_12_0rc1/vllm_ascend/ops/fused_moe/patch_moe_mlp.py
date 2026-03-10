@@ -263,6 +263,10 @@ def unified_apply_mlp_new(hidden_states: torch.Tensor,
 
 def patch_moe_mlp_functions():
     def apply_patch(module):
+        # Store originals before replacing so downstream code (or future
+        # wrappers) can still delegate to the original implementation.
+        module._orig_quant_apply_mlp = module.quant_apply_mlp
+        module._orig_unified_apply_mlp = module.unified_apply_mlp
         module.quant_apply_mlp = quant_apply_mlp_new
         module.unified_apply_mlp = unified_apply_mlp_new
 

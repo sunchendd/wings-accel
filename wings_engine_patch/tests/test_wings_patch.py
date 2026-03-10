@@ -1,6 +1,7 @@
 import unittest
 import sys
 import os
+import json
 from unittest.mock import patch, MagicMock
 
 # Ensure the package is in python path
@@ -77,6 +78,123 @@ class TestWingsPatchMechanism(unittest.TestCase):
             enable('test_engine', ['unknown_feature'], version='1.0.0')
         except Exception as e:
             self.fail(f"enable() raised Exception for unknown feature: {e}")
+
+    def test_enable_returns_empty_failures_on_success(self):
+        """enable() returns an empty list when all patches apply without error."""
+        failures = enable('test_engine', ['feature_match'], version='1.0.0')
+        self.assertEqual(failures, [], "No failures expected for a successful patch run")
+
+    def test_enable_returns_failures_on_patch_exception(self):
+        """enable() collects (name, exc) for patches that raise."""
+        def bad_patch():
+            raise RuntimeError("deliberate failure")
+
+        bad_patch.__module__ = 'test_module'
+        bad_patch.__name__ = 'bad_patch'
+
+        registry_v1._registered_patches['test_engine']['1.0.0']['features']['bad_feat'] = [bad_patch]
+        failures = enable('test_engine', ['bad_feat'], version='1.0.0')
+        self.assertEqual(len(failures), 1)
+        name, exc = failures[0]
+        self.assertIn('bad_patch', name)
+        self.assertIsInstance(exc, RuntimeError)
+
+    def test_enable_unknown_engine_returns_empty(self):
+        """enable() returns empty list and warns for an unregistered engine."""
+        failures = enable('nonexistent_engine', ['feat'], version='1.0.0')
+        self.assertEqual(failures, [])
+
+
+class TestAutoPatchModule(unittest.TestCase):
+    """Unit tests for _auto_patch.py boot-time logic via importlib reload."""
+
+    def _run_auto_patch(self, env_value):
+        """Execute _auto_patch module-level code with a given env var value."""
+        import importlib
+        import wings_engine_patch._auto_patch as ap_mod
+
+        env_patch = {}
+        if env_value is None:
+            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': ''}
+        else:
+            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': env_value}
+
+        with patch.dict(os.environ, env_patch, clear=False):
+            # Reload triggers the module-level try/except block again
+            importlib.reload(ap_mod)
+
+    def test_auto_patch_no_env_var_is_silent(self):
+        """No env var → no error, no output."""
+        import io
+        buf = io.StringIO()
+        with patch('sys.stderr', buf):
+            self._run_auto_patch(None)
+        self.assertEqual(buf.getvalue(), '')
+
+    def test_auto_patch_malformed_json_warns(self):
+        """Malformed JSON → Warning on stderr, no crash."""
+        import io
+        buf = io.StringIO()
+        with patch('sys.stderr', buf):
+            self._run_auto_patch('{not valid json}')
+        self.assertIn('Warning', buf.getvalue())
+
+    def test_auto_patch_missing_version_warns(self):
+        """Config with no 'version' key → Warning, patch not applied."""
+        import io
+        buf = io.StringIO()
+        opts = json.dumps({'vllm_ascend': {'features': ['soft_fp8']}})
+        with patch('sys.stderr', buf):
+            self._run_auto_patch(opts)
+        self.assertIn('missing', buf.getvalue().lower())
+
+    def test_auto_patch_unknown_engine_warns(self):
+        """Unknown engine → Warning on stderr."""
+        import io
+        buf = io.StringIO()
+        opts = json.dumps({'totally_unknown_engine': {'version': '1.0', 'features': ['x']}})
+        with patch('sys.stderr', buf):
+            self._run_auto_patch(opts)
+        self.assertIn('not registered', buf.getvalue())
+
+    def test_auto_patch_top_level_non_dict_warns(self):
+        """Non-dict JSON top level → Warning on stderr."""
+        import io
+        buf = io.StringIO()
+        with patch('sys.stderr', buf):
+            self._run_auto_patch('["not", "a", "dict"]')
+        self.assertIn('Warning', buf.getvalue())
+
+    def test_auto_patch_patch_failure_logged(self):
+        """Patch that raises → failure is logged to stderr by _auto_patch."""
+        import io
+        import importlib
+        import wings_engine_patch._auto_patch as ap_mod
+        import wings_engine_patch.registry_v1 as rv1
+
+        def exploding_patch():
+            raise RuntimeError("boom")
+        exploding_patch.__module__ = 'test_mod'
+        exploding_patch.__name__ = 'exploding_patch'
+
+        orig = rv1._registered_patches.copy()
+        rv1._registered_patches['test_explode'] = {
+            '1.0': {
+                'is_default': True,
+                'features': {'feat': [exploding_patch]},
+                'non_propagating_patches': set(),
+            }
+        }
+        opts = json.dumps({'test_explode': {'version': '1.0', 'features': ['feat']}})
+        buf = io.StringIO()
+        try:
+            with patch('sys.stderr', buf):
+                with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}):
+                    importlib.reload(ap_mod)
+        finally:
+            rv1._registered_patches = orig
+        self.assertIn('exploding_patch', buf.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

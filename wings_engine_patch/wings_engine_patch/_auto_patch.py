@@ -27,7 +27,9 @@ try:
                             continue
 
                         if isinstance(features, list) and features:
-                            enable(engine_key, features, version=version)
+                            failures = enable(engine_key, features, version=version)
+                            for patch_name, exc in failures:
+                                print(f"[Wings Engine Patch] Patch failed — {patch_name}: {exc}", file=sys.stderr)
                     else:
                         print(f"[Wings Engine Patch] Warning: Configuration for engine '{engine_key}' must be a dictionary with 'version' and 'features'. Ignoring.", file=sys.stderr)
             else:
