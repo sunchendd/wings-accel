@@ -46,23 +46,89 @@ python build_wheel.py            # builds dist/*.whl with .pth injection
 
 ---
 
-## Phase 3 — Optimization Review
+## Phase 3 — Optimization Findings
 
-Dimensions to analyze (analysis only, no code changes unless trivial):
+### Bug Fixed
 
-| Area | Item |
-|------|------|
-| Registry | Lazy builder: `_ensure_features_loaded` called inside `enable()` — concurrent-safety analysis |
-| Registry | Shared-patch expansion loop: fixed-point iteration is correct but O(N²) for large feature sets |
-| Error handling | `_auto_patch.py` catches bare `Exception` and swallows `ImportError` from builder — should distinguish recoverable vs fatal |
-| Build | `build_wheel.py` manually splices RECORD sha256 — no validation that the hash matches what pip would compute |
-| Tests | `test_wings_patch.py` mock registry doesn't cover the lazy-builder path; `_auto_patch.py` has no direct test |
-| Config | `WINGS_ENGINE_PATCH_OPTIONS` parsing silently ignores non-dict top-level — could log the raw value for debugging |
+**`build_wheel.py`: Duplicate `RECORD,,` entry** *(Fixed)*  
+`old_record` already ends with `wings_engine_patch-*.dist-info/RECORD,,` (pip always writes it last). The script then appended a second `RECORD,,`. Fix: strip any existing `RECORD` line from `old_record` before writing the new entries.
+
+---
+
+### Issues Found
+
+#### 1. Unintended feature expansion: `soft_fp8` silently enables all of `soft_fp4`
+
+`SOFT_FP8_SPECIFIC` and `SOFT_FP4_SPECIFIC` share four patch function objects:
+`patch_ASCEND_QUANTIZATION_METHOD_MAP`, `is_layer_skipped_ascend`, `get_quant_method`, `create_weights` (AscendLinearMethod).  
+None are listed in `non_propagating_patches`, so `_expand_features_by_shared_patches` auto-expands `soft_fp8 → {soft_fp8, soft_fp4}` and prints a confusing log line.  
+Since `soft_fp4` is a strict subset of `soft_fp8`, there is no behavioral harm today, but it breaks the principle of least surprise and the expansion log misleads users.
+
+**Recommendation:** Add the four shared functions to `non_propagating_patches`, or extract them into a `common_quant` feature that both `soft_fp8` and `soft_fp4` list as an explicit dependency (requires a richer dependency model).
+
+---
+
+#### 2. Four separate wrapt hooks all targeting the same module
+
+`patch_quant_config.py` calls `wrapt.register_post_import_hook` four times on `vllm_ascend.quantization.quant_config`, producing four separate callbacks that each run `wrap_function_wrapper`.  
+**Recommendation:** Consolidate into one hook that wraps all four methods, reducing import-time overhead and simplifying the call graph.
+
+---
+
+#### 3. Identical `create_weights` wrapper in two patch functions
+
+`patch_AscendLinearMethod_create_weights` and `patch_AscendFusedMoEMethod_create_weights` contain byte-for-byte identical `_wrapper` bodies.  
+**Recommendation:** Extract a shared `_make_create_weights_wrapper()` helper; each function calls it with the appropriate target class name.
+
+---
+
+#### 4. Fragile positional-argument unpacking in `get_quant_method` wrapper
+
+`patch_AscendQuantConfig_get_quant_method` manually inspects `len(args)` and `kwargs` keys to reconstruct `layer` and `prefix`. If vllm-ascend's signature changes (e.g., adds a parameter), this silently raises `ValueError("Invalid arguments")`.  
+**Recommendation:** Use `inspect.signature(wrapped).bind(*args, **kwargs).arguments` for robust argument extraction.
+
+---
+
+#### 5. `patch_moe_mlp_functions` uses direct assignment instead of wrapt wrapping
+
+`module.quant_apply_mlp = quant_apply_mlp_new` replaces the attribute unconditionally; the original is not accessible via `wrapped(...)`. This is inconsistent with the `patch_quant_config` approach and makes it impossible to chain another wrapper later.  
+**Recommendation:** Keep the direct-replacement approach but document it explicitly, and store the original (`module._orig_quant_apply_mlp = module.quant_apply_mlp`) before replacing, so future wrappers can delegate.
+
+---
+
+#### 6. `patch_ASCEND_QUANTIZATION_METHOD_MAP` hook is dead in 0.12.0rc1
+
+`vllm_ascend.quantization.utils` has a circular import in the installed 0.12.0rc1 source:  
+`utils → w4a8_dynamic → ops/__init__ → fused_moe.fused_moe → w4a8_dynamic` (cycle).  
+The module never finishes loading, so the wrapt hook never fires. The `ASCEND_QUANTIZATION_METHOD_MAP` patch is effectively a no-op.  
+**Recommendation:** File an upstream bug. Workaround: register the hook on a module that imports `utils` *after* it has been fully initialized (e.g., `vllm_ascend.quantization.quant_config`, which already loads successfully).
+
+---
+
+#### 7. Patch failures are fully silent to callers
+
+`enable()` catches all `Exception` from each `patch_func()` and logs to stderr. There is no way for `_auto_patch.py` (or external tooling) to know which patches failed.  
+**Recommendation:** Return (or accumulate) a list of `(patch_name, error)` failures from `enable()` so callers can surface a structured warning.
+
+---
+
+#### 8. `_ensure_features_loaded` is not thread-safe
+
+`ver_specs.update(ver_specs['builder']())` reads `'features' not in ver_specs` and then writes `ver_specs.update(...)` without a lock. In a multi-process or multi-threaded startup (vLLM spawns workers), two threads could both pass the `if 'features' not in ver_specs` check, call the builder twice, and race on `dict.update`.  
+**Recommendation:** Guard with `threading.Lock()` or use `setdefault` + `dict.copy`.
+
+---
+
+#### 9. `_auto_patch.py` has no direct unit test
+
+`test_wings_patch.py` exercises `registry_v1.enable()` directly (bypassing `_auto_patch.py`).  
+The subprocess test in `test_integration_real.py` (`test_auto_patch_subprocess`) covers the happy path but not: missing env var, malformed JSON, unknown engine name, or import failures inside the builder.  
+**Recommendation:** Add parametrized unit tests for `_auto_patch._run_patch()` mocking `registry_v1.enable`.
 
 ---
 
 ## Execution Order
 
-1. Build → verify whl contents
-2. Install → run integration test script
-3. Summarize optimization findings
+1. Build → verify whl contents ✅
+2. Install → run integration test script ✅ (14/14 passed)
+3. Summarize optimization findings ✅

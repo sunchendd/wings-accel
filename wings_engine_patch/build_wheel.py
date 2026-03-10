@@ -82,10 +82,19 @@ def build_wheel():
             print(f"Adding wings_engine_patch.pth to {destination_path}")
             zout.writestr(destination_path, pth_bytes)
 
-            # Update RECORD with new entry + pth entry
-            new_record = old_record.rstrip("\n")
-            new_record += f"\n{destination_path},{pth_hash},{len(pth_bytes)}\n"
-            new_record += f"{record_name},,\n"
+            # Update RECORD with new entry + pth entry.
+            # The original RECORD already ends with "<record_name>,,"  (pip
+            # always writes that sentinel last).  Strip it before appending so
+            # we don't produce a duplicate RECORD entry.
+            stripped_record = "\n".join(
+                line for line in old_record.splitlines()
+                if line.strip() and not line.startswith(record_name)
+            )
+            new_record = (
+                stripped_record
+                + f"\n{destination_path},{pth_hash},{len(pth_bytes)}\n"
+                + f"{record_name},,\n"
+            )
             zout.writestr(record_name, new_record)
 
     # Replace original wheel
