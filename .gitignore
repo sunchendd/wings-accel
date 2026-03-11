@@ -36,3 +36,4 @@ fusion_result.json
 .vscode/
 *.swp
 *.swo
+.worktrees/
