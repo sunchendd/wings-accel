@@ -108,6 +108,14 @@ class TestWingsPatchMechanism(unittest.TestCase):
 class TestAutoPatchModule(unittest.TestCase):
     """Unit tests for _auto_patch.py boot-time logic via importlib reload."""
 
+    HELLO_WORLD_OPTIONS = json.dumps(
+        {'vllm': {'version': '0.12.0+empty', 'features': ['hello_world']}}
+    )
+    HELLO_WORLD_LOG = '[Vllm Patch] hello_world patch enabled'
+    HELLO_WORLD_WARNING = "Feature 'hello_world' not found in registry"
+    PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
+    PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
+
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""
         import importlib
@@ -143,7 +151,7 @@ class TestAutoPatchModule(unittest.TestCase):
         """Config with no 'version' key → Warning, patch not applied."""
         import io
         buf = io.StringIO()
-        opts = json.dumps({'vllm_ascend': {'features': ['soft_fp8']}})
+        opts = json.dumps({'vllm': {'features': ['hello_world']}})
         with patch('sys.stderr', buf):
             self._run_auto_patch(opts)
         self.assertIn('missing', buf.getvalue().lower())
@@ -194,6 +202,36 @@ class TestAutoPatchModule(unittest.TestCase):
         finally:
             rv1._registered_patches = orig
         self.assertIn('exploding_patch', buf.getvalue())
+
+    def test_auto_patch_hello_world_feature_logs(self):
+        """hello_world should emit its startup log when auto-patch enables it."""
+        import io
+
+        buf = io.StringIO()
+        with patch('sys.stderr', buf):
+            self._run_auto_patch(self.HELLO_WORLD_OPTIONS)
+
+        stderr = buf.getvalue()
+        self.assertNotIn(
+            self.HELLO_WORLD_WARNING,
+            stderr,
+            f"hello_world should be registered, not rejected as missing:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_FAILURE_LOG,
+            stderr,
+            f"hello_world startup should not report patch failures:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_EXECUTION_ERROR_LOG,
+            stderr,
+            f"hello_world startup should not report patch execution errors:\n{stderr}",
+        )
+        self.assertIn(
+            self.HELLO_WORLD_LOG,
+            stderr,
+            'Expected hello_world startup log when auto-patching vllm hello_world',
+        )
 
 
 if __name__ == '__main__':

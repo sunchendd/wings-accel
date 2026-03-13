@@ -19,7 +19,7 @@ The --features JSON format:
     }
 
 Example:
-    python install.py --features '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
+    python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
 """
 
 import argparse
@@ -29,11 +29,12 @@ import sys
 from pathlib import Path
 
 # Root-level supported_features.json is the CLI/MaaS-facing source of truth.
-_SUPPORTED_FEATURES_PATH = Path(__file__).parent / "supported_features.json"
+_BASE_DIR = Path(__file__).resolve().parent
+_SUPPORTED_FEATURES_PATH = _BASE_DIR / "supported_features.json"
+_LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "build" / "output"
 
 # Map engine names to pyproject.toml [optional-dependencies] extras keys.
 _ENGINE_TO_EXTRAS = {
-    "vllm_ascend": "vllm_ascend",
     "vllm": "vllm",
 }
 
@@ -137,13 +138,20 @@ def validate_features(
 # ---------------------------------------------------------------------------
 
 def _find_local_whl() -> Path | None:
-    """Return the most recently built .whl in wings_engine_patch/dist/, if present."""
-    dist_dir = Path(__file__).parent / "wings_engine_patch" / "dist"
-    if dist_dir.exists():
-        whls = list(dist_dir.glob("*.whl"))
+    """Return the most recently built .whl in build/output/, if present."""
+    if _LOCAL_WHEEL_DIR.exists():
+        whls = list(_LOCAL_WHEEL_DIR.glob("*.whl"))
         if whls:
             return max(whls, key=lambda p: p.stat().st_mtime)
     return None
+
+
+def _has_local_runtime_deps() -> bool:
+    try:
+        import wrapt  # noqa: F401
+    except ImportError:
+        return False
+    return True
 
 
 def install_engine(
@@ -159,6 +167,8 @@ def install_engine(
     if local_whl:
         pkg = f"{local_whl}[{extras}]"
         cmd = [sys.executable, "-m", "pip", "install", pkg, "--force-reinstall"]
+        if _has_local_runtime_deps():
+            cmd.append("--no-deps")
     else:
         pkg = f"wings_engine_patch[{extras}]"
         cmd = [sys.executable, "-m", "pip", "install", pkg]
@@ -295,10 +305,9 @@ def main() -> None:
         epilog="""
 Examples:
   python install.py --list
-  python install.py --features '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
-  python install.py --features '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}' --dry-run
-  python install.py --check --features '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
-  python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": []}}' --dry-run
+  python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+  python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}' --dry-run
+  python install.py --check --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
 """,
     )
     parser.add_argument(

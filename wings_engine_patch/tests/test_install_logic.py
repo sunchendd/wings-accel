@@ -9,11 +9,21 @@ import sys
 import os
 import unittest
 import io
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from install import validate_schema, resolve_version, validate_features, main as install_main
+import install as install_module
+from install import (
+    load_supported_features,
+    validate_schema,
+    resolve_version,
+    validate_features,
+    main as install_main,
+)
 import wings_engine_patch.registry_v1 as registry_v1
 
 
@@ -138,14 +148,14 @@ class TestResolveVersion(unittest.TestCase):
 class TestValidateFeatures(unittest.TestCase):
 
     def _version_spec(self):
-        return {"features": {"soft_fp8": {}, "soft_fp4": {}}}
+        return {"features": {"hello_world": {}, "metrics": {}}}
 
     def test_known_feature_produces_no_warning(self):
         captured = io.StringIO()
         orig = sys.stderr
         sys.stderr = captured
         try:
-            validate_features("myengine", "1.0.0", ["soft_fp8"], self._version_spec())
+            validate_features("myengine", "1.0.0", ["hello_world"], self._version_spec())
         finally:
             sys.stderr = orig
         self.assertEqual(captured.getvalue(), "")
@@ -170,6 +180,68 @@ class TestValidateFeatures(unittest.TestCase):
         finally:
             sys.stderr = orig
         self.assertEqual(captured.getvalue(), "")
+
+
+# ---------------------------------------------------------------------------
+# supported_features.json and local wheel discovery
+# ---------------------------------------------------------------------------
+
+class TestSupportedFeatureManifest(unittest.TestCase):
+
+    def test_manifest_only_exposes_vllm_hello_world(self):
+        data = load_supported_features()
+        self.assertEqual(set(data["engines"].keys()), {"vllm"})
+
+        versions = data["engines"]["vllm"]["versions"]
+        self.assertEqual(set(versions.keys()), {"0.12.0+empty"})
+
+        features = versions["0.12.0+empty"]["features"]
+        self.assertEqual(set(features.keys()), {"hello_world"})
+
+
+class TestFindLocalWheel(unittest.TestCase):
+
+    def test_find_local_whl_reads_root_build_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wheel_dir = Path(tmpdir) / "build" / "output"
+            wheel_dir.mkdir(parents=True)
+
+            older = wheel_dir / "wings_engine_patch-1.0.0-py3-none-any.whl"
+            newer = wheel_dir / "wings_engine_patch-1.0.1-py3-none-any.whl"
+            older.write_text("older", encoding="utf-8")
+            newer.write_text("newer", encoding="utf-8")
+            os.utime(older, (1, 1))
+            os.utime(newer, (2, 2))
+
+            with patch.object(install_module, "_LOCAL_WHEEL_DIR", wheel_dir):
+                found = install_module._find_local_whl()
+
+            self.assertEqual(found, newer)
+
+
+class TestInstallEngine(unittest.TestCase):
+
+    def test_local_wheel_dry_run_skips_deps_when_wrapt_already_installed(self):
+        captured = io.StringIO()
+        wheel_path = Path("/tmp/wings_engine_patch-1.0.0-py3-none-any.whl")
+
+        with patch.object(install_module, "_find_local_whl", return_value=wheel_path):
+            with patch.object(install_module, "_has_local_runtime_deps", return_value=True):
+                orig = sys.stdout
+                sys.stdout = captured
+                try:
+                    install_module.install_engine(
+                        "vllm",
+                        "0.12.0+empty",
+                        ["hello_world"],
+                        dry_run=True,
+                    )
+                finally:
+                    sys.stdout = orig
+
+        output = captured.getvalue()
+        self.assertIn("--no-deps", output)
+        self.assertIn(str(wheel_path), output)
 
 
 # ---------------------------------------------------------------------------
@@ -283,14 +355,14 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
     def test_typo_feature_key_warns(self):
         # 'feature' instead of 'features' — should warn
         output = self._run_main_capture_stderr(
-            '{"vllm_ascend": {"version": "0.12.0rc1", "feature": ["soft_fp8"]}}'
+            '{"vllm": {"version": "0.12.0+empty", "feature": ["hello_world"]}}'
         )
         self.assertIn("unknown keys", output.lower())
         self.assertIn("feature", output)
 
     def test_correct_keys_no_warning(self):
         output = self._run_main_capture_stderr(
-            '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
+            '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
         )
         self.assertNotIn("unknown keys", output.lower())
 

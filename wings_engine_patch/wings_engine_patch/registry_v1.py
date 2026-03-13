@@ -1,6 +1,6 @@
 import sys
 import threading
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 # Structure: 
 # {
@@ -15,67 +15,16 @@ from typing import List, Tuple, Optional
 #   }
 # }
 
-# --- Feature Builders ---
-def _build_vllm_ascend_v0_12_0rc1_features():
-    """Builder for vllm_ascend 0.12.0rc1 features."""
-    
-    # Import specific sub-modules directly
-    from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.quantization import patch_utils
-    from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.quantization import patch_quant_config
-    from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.ops.fused_moe import patch_moe_comm_method
-    from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.ops.fused_moe import patch_moe_mlp
-
-    SOFT_FP8_SPECIFIC = [
-        patch_utils.patch_ASCEND_QUANTIZATION_METHOD_MAP,
-        patch_quant_config.patch_AscendQuantConfig_is_layer_skipped_ascend,
-        patch_quant_config.patch_AscendQuantConfig_get_quant_method,
-        patch_quant_config.patch_AscendLinearMethod_create_weights,
-        patch_quant_config.patch_AscendFusedMoEMethod_create_weights,
-        patch_moe_comm_method.patch_moe_comm_method_fused_experts,
-        patch_moe_mlp.patch_moe_mlp_functions
-    ]
-
-    SOFT_FP4_SPECIFIC = [
-         patch_utils.patch_ASCEND_QUANTIZATION_METHOD_MAP,
-         patch_quant_config.patch_AscendQuantConfig_is_layer_skipped_ascend,
-         patch_quant_config.patch_AscendQuantConfig_get_quant_method,
-         patch_quant_config.patch_AscendLinearMethod_create_weights,
-    ]
-    
-    # Patches shared between soft_fp8 and soft_fp4 that should NOT trigger
-    # automatic cross-feature expansion (they are common prerequisites, not
-    # indicators that the features are equivalent).
-    non_propagating_patches = {
-        patch_utils.patch_ASCEND_QUANTIZATION_METHOD_MAP,
-        patch_quant_config.patch_AscendQuantConfig_is_layer_skipped_ascend,
-        patch_quant_config.patch_AscendQuantConfig_get_quant_method,
-        patch_quant_config.patch_AscendLinearMethod_create_weights,
-    }
-
-    return {
-        'features': {
-            'soft_fp8': SOFT_FP8_SPECIFIC,
-            'soft_fp4': SOFT_FP4_SPECIFIC,
-        },
-        'non_propagating_patches': non_propagating_patches
-    }
-
 def _build_vllm_v0_12_0_empty_features():
-    from wings_engine_patch.patch_vllm_container.v0_12_0_empty import test_patch
+    from wings_engine_patch.patch_vllm_container.v0_12_0_empty import hello_world_patch
     
     return {
         'features': {
-            'test_patch': [test_patch.patch_vllm_report_kv_cache_config]
+            'hello_world': [hello_world_patch.patch_vllm_hello_world],
         }
     }
 
 _registered_patches = {
-    'vllm_ascend': {
-        "0.12.0rc1": {
-            'is_default': True,
-            'builder': _build_vllm_ascend_v0_12_0rc1_features
-        }
-    },
     'vllm': {
         "0.12.0+empty": {
             'is_default': True,

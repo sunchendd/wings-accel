@@ -1,30 +1,16 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-01-23",
+  "updated_at": "2026-03-12",
   "description": "Registry of supported inference engines and their patch capabilities provided by wings-engine-patch.",
   "engines": {
-    "vllm_ascend": {
-      "description": "vLLM adaptation for Huawei Ascend NPUs",
-      "versions": {
-        "0.12.0rc1": {
-          "is_default": true,
-          "features": {
-            "soft_fp8": {
-              "description": "Software simulation for FP8 quantization logic"            },
-            "soft_fp4": {
-              "description": "Software simulation for FP4 (NV-style W4A16NVFP4) quantization logic"            }
-          }
-        }
-      }
-    },
     "vllm": {
       "description": "Standard vLLM Inference Engine",
       "versions": {
         "0.12.0+empty": {
           "is_default": true,
           "features": {
-            "test_patch": {
-              "description": "Diagnostic patch for verifying injection mechanism"
+            "hello_world": {
+              "description": "Diagnostic startup log for validating Python auto-patch injection in vLLM"
             }
           }
         }

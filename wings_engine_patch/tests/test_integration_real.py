@@ -4,9 +4,8 @@ Integration test for the wings-engine-patch monkey-patch framework.
 Verifies:
   1. .pth hook is installed in site-packages
   2. wrapt post-import hook mechanism works (synthetic module)
-  3. Real patches fire on actual vllm_ascend modules (moe_mlp, quant_config)
+  3. the hello_world diagnostic patch can be enabled cleanly for vllm
   4. _auto_patch.py is triggered by the .pth file on Python startup (subprocess)
-  5. Documents known circular-import issue in utils.py
 
 Run with:
     python tests/test_integration_real.py
@@ -152,78 +151,26 @@ class TestWraptHookMechanism(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. Real patch: moe_mlp
+# 3. Direct patch registration: hello_world
 # ---------------------------------------------------------------------------
 
-class TestMoeMlpPatch(unittest.TestCase):
-    """
-    Verify that patch_moe_mlp_functions() successfully registers a wrapt hook
-    on vllm_ascend.ops.fused_moe.moe_mlp and that after import the function
-    vllm_ascend.ops.fused_moe.moe_mlp.quant_apply_mlp is the patched version.
-    """
+class TestHelloWorldPatch(unittest.TestCase):
 
-    def test_moe_mlp_module_importable(self):
-        """Precondition: moe_mlp module must be importable."""
-        try:
-            import vllm_ascend.ops.fused_moe.moe_mlp as moe_mlp  # noqa
-        except ImportError as e:
-            self.fail(f"vllm_ascend.ops.fused_moe.moe_mlp not importable: {e}")
+    def test_patch_vllm_hello_world_logs_to_stderr(self):
+        import io
+        from unittest.mock import patch
 
-    def test_patch_moe_mlp_replaces_function(self):
-        """After calling patch_moe_mlp_functions(), quant_apply_mlp is wrapped."""
-        # Fresh import of the patch module
-        import vllm_ascend.ops.fused_moe.moe_mlp as moe_mlp
-        original_fn = moe_mlp.quant_apply_mlp
+        from wings_engine_patch.patch_vllm_container.v0_12_0_empty import hello_world_patch
 
-        from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.ops.fused_moe import patch_moe_mlp
-        patch_moe_mlp.patch_moe_mlp_functions()
+        buf = io.StringIO()
+        with patch("sys.stderr", buf):
+            hello_world_patch.patch_vllm_hello_world()
 
-        # Reload to trigger any pending wrapt hooks
-        importlib.reload(moe_mlp)
-
-        # The function should now be a wrapped version
-        patched_fn = moe_mlp.quant_apply_mlp
-        # Verify hook fired: the patch module's replacement should be installed
-        self.assertIsNotNone(patched_fn,
-                             "quant_apply_mlp is None after patching")
-        print(f"\n  [OK] moe_mlp.quant_apply_mlp: {patched_fn}")
+        self.assertIn("[Vllm Patch] hello_world patch enabled", buf.getvalue())
 
 
 # ---------------------------------------------------------------------------
-# 4. Real patch: quant_config
-# ---------------------------------------------------------------------------
-
-class TestQuantConfigPatch(unittest.TestCase):
-    """
-    Verify that patch functions for quant_config can be registered without error.
-    """
-
-    def test_quant_config_module_importable(self):
-        try:
-            import vllm_ascend.quantization.quant_config  # noqa
-        except ImportError as e:
-            self.fail(f"quant_config not importable: {e}")
-
-    def test_patch_quant_config_registers_without_error(self):
-        """All patch_quant_config patch functions run without exception."""
-        from wings_engine_patch.patch_vllm_ascend_container.v0_12_0rc1.vllm_ascend.quantization import patch_quant_config
-        funcs = [
-            patch_quant_config.patch_AscendQuantConfig_is_layer_skipped_ascend,
-            patch_quant_config.patch_AscendQuantConfig_get_quant_method,
-            patch_quant_config.patch_AscendLinearMethod_create_weights,
-            patch_quant_config.patch_AscendFusedMoEMethod_create_weights,
-        ]
-        for fn in funcs:
-            with self.subTest(fn=fn.__name__):
-                try:
-                    fn()
-                except Exception as e:
-                    self.fail(f"{fn.__name__} raised: {e}")
-        print(f"\n  [OK] All {len(funcs)} quant_config patches registered")
-
-
-# ---------------------------------------------------------------------------
-# 5. Subprocess: _auto_patch.py triggered by .pth on startup
+# 4. Subprocess: _auto_patch.py triggered by .pth on startup
 # ---------------------------------------------------------------------------
 
 class TestAutoPatchSubprocess(unittest.TestCase):
@@ -235,18 +182,17 @@ class TestAutoPatchSubprocess(unittest.TestCase):
       - Patch hooks are registered (wrapt hooks are set up)
     """
 
-    ENV_OPTIONS = '{"vllm_ascend": {"version": "0.12.0rc1", "features": ["soft_fp8"]}}'
+    HELLO_WORLD_OPTIONS = '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+    HELLO_WORLD_LOG = '[Vllm Patch] hello_world patch enabled'
+    HELLO_WORLD_WARNING = "Feature 'hello_world' not found in registry"
+    PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
+    PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
     def test_auto_patch_no_critical_error(self):
-        code = textwrap.dedent("""
-            import sys
-            # Just import the framework to force pth execution path
-            import wings_engine_patch._auto_patch
-            print("auto_patch_loaded", file=sys.stdout)
-        """)
+        code = "print('auto_patch_loaded')"
         rc, stdout, stderr = _run_python(
             code,
-            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ENV_OPTIONS},
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.HELLO_WORLD_OPTIONS},
         )
         self.assertNotIn(
             "[Wings Engine Patch] Critical Error",
@@ -259,7 +205,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
 
     def test_auto_patch_missing_version_warns(self):
         """Missing 'version' key in config should produce a warning, not crash."""
-        bad_options = '{"vllm_ascend": {"features": ["soft_fp8"]}}'
+        bad_options = '{"vllm": {"features": ["hello_world"]}}'
         code = "import wings_engine_patch._auto_patch; print('ok')"
         rc, stdout, stderr = _run_python(
             code,
@@ -289,37 +235,35 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertIn("Warning", stderr)
         self.assertEqual(rc, 0)
 
-
-# ---------------------------------------------------------------------------
-# 6. Known issue: utils.py circular import
-# ---------------------------------------------------------------------------
-
-class TestKnownIssues(unittest.TestCase):
-    """Documents known issues found during integration analysis."""
-
-    def test_utils_circular_import_is_known_issue(self):
-        """
-        vllm_ascend.quantization.utils has a circular import in the installed source:
-          utils.py -> w4a8_dynamic -> ops/__init__ -> fused_moe.fused_moe -> w4a8_dynamic (circular)
-
-        This means patch_ASCEND_QUANTIZATION_METHOD_MAP's wrapt hook can never fire
-        because the target module (vllm_ascend.quantization.utils) fails to import.
-
-        This is a pre-existing bug in the installed vllm-ascend source
-        (0.12.0rc1 with additional files not present in the original tag).
-        """
-        try:
-            import vllm_ascend.quantization.utils  # noqa
-            # If import succeeds, the circular import was fixed upstream
-            print("\n  [INFO] utils.py circular import appears to be fixed in this build")
-        except ImportError as e:
-            # Circular import detected — document it
-            self.assertIn("circular import", str(e).lower(),
-                          f"Unexpected ImportError (not circular): {e}")
-            print(f"\n  [KNOWN ISSUE] utils.py circular import: {e}")
-            print("  Action required: fix circular import in vllm_ascend source, "
-                  "or restructure patch_utils.py to use a different hook target.")
-
+    def test_auto_patch_hello_world_logs_on_startup(self):
+        """hello_world should log to stderr when auto-patch enables it at startup."""
+        code = "print('startup_probe')"
+        rc, stdout, stderr = _run_python(
+            code,
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.HELLO_WORLD_OPTIONS},
+        )
+        self.assertEqual(rc, 0, f"Process should not crash. stdout={stdout!r} stderr={stderr!r}")
+        self.assertIn("startup_probe", stdout)
+        self.assertNotIn(
+            self.HELLO_WORLD_WARNING,
+            stderr,
+            f"hello_world should be registered during startup, not rejected as missing:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_FAILURE_LOG,
+            stderr,
+            f"hello_world startup should not report patch failures:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_EXECUTION_ERROR_LOG,
+            stderr,
+            f"hello_world startup should not report patch execution errors:\n{stderr}",
+        )
+        self.assertIn(
+            self.HELLO_WORLD_LOG,
+            stderr,
+            f"Expected hello_world startup log in stderr, got:\n{stderr}",
+        )
 
 # ---------------------------------------------------------------------------
 # Main

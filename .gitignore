@@ -12,10 +12,11 @@ env/
 
 # Build artifacts
 dist/
-build/
+/wings_engine_patch/build/
 *.egg-info/
 *.egg
 *.whl
+/build/output/*
 
 # pytest / coverage
 .pytest_cache/

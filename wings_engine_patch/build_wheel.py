@@ -6,23 +6,28 @@ import shutil
 import glob
 import subprocess
 import zipfile
+import argparse
 
-def build_wheel():
+def build_wheel(outdir="dist"):
     # Clean previous builds
-    if os.path.exists("dist"):
+    if outdir == "dist" and os.path.exists("dist"):
         shutil.rmtree("dist")
     if os.path.exists("build"):
         shutil.rmtree("build")
     if os.path.exists("wings_engine_patch.egg-info"):
         shutil.rmtree("wings_engine_patch.egg-info")
 
+    os.makedirs(outdir, exist_ok=True)
+    for old_wheel in glob.glob(os.path.join(outdir, "*.whl")):
+        os.remove(old_wheel)
+
     # Build the wheel using current interpreter (supports venv)
-    subprocess.check_call([sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", "dist"])
+    subprocess.check_call([sys.executable, "-m", "build", "--wheel", "--no-isolation", "--outdir", outdir])
 
     # Find the built wheel
-    whl_files = glob.glob("dist/*.whl")
+    whl_files = glob.glob(os.path.join(outdir, "*.whl"))
     if not whl_files:
-        raise Exception("No wheel file found in dist/")
+        raise Exception(f"No wheel file found in {outdir}/")
     whl_path = whl_files[0]
     print(f"Original wheel: {whl_path}")
 
@@ -103,4 +108,7 @@ def build_wheel():
     print(f"Modified wheel: {whl_path}")
 
 if __name__ == "__main__":
-    build_wheel()
+    parser = argparse.ArgumentParser(description="Build wings_engine_patch wheel with .pth injection.")
+    parser.add_argument("--outdir", default="dist", help="Directory where the built wheel will be written.")
+    args = parser.parse_args()
+    build_wheel(outdir=args.outdir)
