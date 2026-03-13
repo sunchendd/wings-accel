@@ -1,5 +1,5 @@
-import sys
+import logging
 
 
 def patch_vllm_hello_world():
-    print('[Vllm Patch] hello_world patch enabled', file=sys.stderr)
+    logging.info('[Vllm Patch] hello_world patch enabled')

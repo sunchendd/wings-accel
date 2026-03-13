@@ -24,9 +24,24 @@ Example:
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 from pathlib import Path
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+stderr_logger = logging.getLogger('stderr')
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.INFO)
+stderr_logger.addHandler(stderr_handler)
 
 # Root-level supported_features.json is the CLI/MaaS-facing source of truth.
 _BASE_DIR = Path(__file__).resolve().parent
@@ -95,13 +110,12 @@ def resolve_version(engine_name: str, requested_version: str, engine_spec: dict)
     if requested_version in versions:
         return requested_version, versions[requested_version]
 
-    # Fallback: find the default version
+# Fallback: find the default version
     for ver, spec in versions.items():
         if spec.get("is_default", False):
-            print(
+            stderr_logger.warning(
                 f"[wings-accel] Warning: version '{requested_version}' not found for engine "
-                f"'{engine_name}'. Falling back to default version '{ver}'.",
-                file=sys.stderr,
+                f"'{engine_name}'. Falling back to default version '{ver}'."
             )
             return ver, spec
 
@@ -125,11 +139,10 @@ def validate_features(
     available = set(version_spec.get("features", {}).keys())
     unknown = set(requested_features) - available
     if unknown:
-        print(
+        stderr_logger.warning(
             f"[wings-accel] Warning: features {sorted(unknown)} are not listed in "
             f"{engine_name}@{version}. Available: {sorted(available)}. "
-            "Proceeding with installation anyway.",
-            file=sys.stderr,
+            "Proceeding with installation anyway."
         )
 
 
@@ -174,15 +187,15 @@ def install_engine(
         cmd = [sys.executable, "-m", "pip", "install", pkg]
 
     if dry_run:
-        print(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
+        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
         _print_env_hint(engine_name, version, features, dry_run=True)
         return
 
-    print(f"[wings-accel] Installing for engine '{engine_name}' (extras: [{extras}]) ...")
+    logger.info(f"[wings-accel] Installing for engine '{engine_name}' (extras: [{extras}]) ...")
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
-        print(f"[wings-accel] Error: pip install failed (exit {e.returncode}).", file=sys.stderr)
+        stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
         sys.exit(e.returncode)
 
     _print_env_hint(engine_name, version, features)
@@ -191,7 +204,7 @@ def install_engine(
 def _print_env_hint(engine_name: str, version: str, features: list, dry_run: bool = False) -> None:
     patch_options = {engine_name: {"version": version, "features": features}}
     prefix = "[dry-run] " if dry_run else ""
-    print(
+    logger.info(
         f"\n{prefix}[wings-accel] ✅ Done. To enable patches at runtime, set:\n"
         f"  export WINGS_ENGINE_PATCH_OPTIONS='{json.dumps(patch_options)}'"
     )
@@ -201,49 +214,57 @@ def _print_env_hint(engine_name: str, version: str, features: list, dry_run: boo
 # Developer self-validation (--check)
 # ---------------------------------------------------------------------------
 
-def check_installed(engine_name: str, version: str, features: list) -> bool:
+def check_installed(
+    engine_name: str,
+    version: str,
+    features: list
+) -> bool:
     """Verify that wings_engine_patch is installed and the requested engine/features
-    are registered in the patch registry."""
-    print(f"[wings-accel] Checking {engine_name}@{version} features: {features}")
+    are registered in the patch registry.
+
+    Returns:
+        bool: True if all checks pass, False otherwise
+    """
+    logger.info(f"[wings-accel] Checking {engine_name}@{version} features: {features}")
 
     # 1. package installed?
     try:
         import wings_engine_patch  # noqa: F401
         import wings_engine_patch.registry_v1 as reg_v1
 
-        print(f"  ✅ wings_engine_patch installed")
+        logger.info("  ✅ wings_engine_patch installed")
     except ImportError as e:
-        print(f"  ❌ wings_engine_patch not installed: {e}", file=sys.stderr)
+        stderr_logger.error(f"  ❌ wings_engine_patch not installed: {e}")
         return False
 
     # 2. engine registered?
     registry = getattr(reg_v1, "_registered_patches", {})
     if engine_name not in registry:
-        print(f"  ❌ Engine '{engine_name}' not found in patch registry.", file=sys.stderr)
+        stderr_logger.error(f"  ❌ Engine '{engine_name}' not found in patch registry.")
         return False
-    print(f"  ✅ Engine '{engine_name}' registered in patch registry")
+    logger.info(f"  ✅ Engine '{engine_name}' registered in patch registry")
 
     # 3. version (exact or default)?
     engine_versions = registry[engine_name]
     if version in engine_versions:
         ver_spec = engine_versions[version]
-        print(f"  ✅ Version '{version}' found")
+        logger.info(f"  ✅ Version '{version}' found")
     else:
         defaults = {v: s for v, s in engine_versions.items() if s.get("is_default", False)}
         if defaults:
             default_ver = next(iter(defaults))
-            print(f"  ⚠️  Version '{version}' not in registry; default is '{default_ver}'")
+            logger.warning(f"  ⚠️  Version '{version}' not in registry; default is '{default_ver}'")
             ver_spec = defaults[default_ver]
         else:
-            print(f"  ❌ Version '{version}' not found and no default configured.", file=sys.stderr)
+            stderr_logger.error(f"  ❌ Version '{version}' not found and no default configured.")
             return False
 
     # 4. features declared / builder present?
     has_spec = "builder" in ver_spec or "features" in ver_spec
     if not has_spec:
-        print(f"  ❌ No patch spec (builder or features) for {engine_name}@{version}.", file=sys.stderr)
+        stderr_logger.error(f"  ❌ No patch spec (builder or features) for {engine_name}@{version}.")
         return False
-    print(f"  ✅ Patch spec available (lazy builder or pre-loaded features)")
+    logger.info("  ✅ Patch spec available (lazy builder or pre-loaded features)")
 
     # 5. individual features
     declared_features = set()
@@ -251,13 +272,13 @@ def check_installed(engine_name: str, version: str, features: list) -> bool:
         declared_features = set(ver_spec["features"].keys())
     elif "builder" in ver_spec:
         # builder is lazy; we trust declaration in supported_features.json
-        print(f"  ℹ️  Patch uses lazy builder; feature declarations taken from supported_features.json")
+        logger.info("  ℹ️  Patch uses lazy builder; feature declarations taken from supported_features.json")
 
     for feat in features:
         if not declared_features or feat in declared_features:
-            print(f"  ✅ Feature '{feat}' declared")
+            logger.info(f"  ✅ Feature '{feat}' declared")
         else:
-            print(f"  ⚠️  Feature '{feat}' not in loaded spec (may be loaded lazily)")
+            logger.warning(f"  ⚠️  Feature '{feat}' not in loaded spec (may be loaded lazily)")
 
     return True
 
@@ -267,30 +288,30 @@ def check_installed(engine_name: str, version: str, features: list) -> bool:
 # ---------------------------------------------------------------------------
 
 def list_features(data: dict) -> None:
-    print(
-        f"wings-accel supported features  "
+    logger.info(
+        f"wings-accel supported features "
         f"(schema v{data['schema_version']}, updated {data['updated_at']})"
     )
     desc = data.get("description", "")
     if desc:
-        print(f"{desc}\n")
+        logger.info(f"{desc}\n")
 
     for engine_name, engine_def in data["engines"].items():
-        print(f"  Engine: {engine_name}")
+        logger.info(f"  Engine: {engine_name}")
         edesc = engine_def.get("description", "")
         if edesc:
-            print(f"    {edesc}")
+            logger.info(f"    {edesc}")
         for ver, ver_spec in engine_def.get("versions", {}).items():
             default_marker = "  [default]" if ver_spec.get("is_default") else ""
-            print(f"    Version: {ver}{default_marker}")
+            logger.info(f"    Version: {ver}{default_marker}")
             features = ver_spec.get("features", {})
             if features:
                 for feat, feat_def in features.items():
                     fdesc = feat_def.get("description", "")
-                    print(f"      - {feat}: {fdesc}")
+                    logger.info(f"      - {feat}: {fdesc}")
             else:
-                print(f"      (no features declared)")
-    print()
+                logger.info("      (no features declared)")
+    logger.info("")
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +359,7 @@ Examples:
         data = load_supported_features()
         validate_schema(data)
     except (FileNotFoundError, ValueError) as e:
-        print(f"[wings-accel] Error: {e}", file=sys.stderr)
+        stderr_logger.error(f"[wings-accel] Error: {e}")
         sys.exit(1)
 
     # --list
@@ -355,11 +376,11 @@ Examples:
     try:
         features_config = json.loads(args.features)
     except json.JSONDecodeError as e:
-        print(f"[wings-accel] Error: --features is not valid JSON: {e}", file=sys.stderr)
+        stderr_logger.error(f"[wings-accel] Error: --features is not valid JSON: {e}")
         sys.exit(1)
 
     if not isinstance(features_config, dict):
-        print("[wings-accel] Error: --features must be a JSON object.", file=sys.stderr)
+        stderr_logger.error("[wings-accel] Error: --features must be a JSON object.")
         sys.exit(1)
 
     engines_spec = data["engines"]
@@ -367,45 +388,36 @@ Examples:
 
     for engine_name, config in features_config.items():
         if not isinstance(config, dict):
-            print(
+            stderr_logger.error(
                 f"[wings-accel] Error: config for '{engine_name}' must be a JSON object "
-                "with 'version' and optional 'features' keys.",
-                file=sys.stderr,
+                "with 'version' and optional 'features' keys."
             )
             sys.exit(1)
 
         if engine_name not in engines_spec:
-            print(
+            stderr_logger.error(
                 f"[wings-accel] Error: engine '{engine_name}' is not listed in supported_features.json. "
-                f"Available engines: {list(engines_spec.keys())}",
-                file=sys.stderr,
+                f"Available engines: {list(engines_spec.keys())}"
             )
             sys.exit(1)
 
         requested_version = config.get("version")
         requested_features = config.get("features", [])
 
-        _KNOWN_ENGINE_CONFIG_KEYS = {"version", "features"}
-        unknown_keys = set(config.keys()) - _KNOWN_ENGINE_CONFIG_KEYS
+        KNOWN_ENGINE_CONFIG_KEYS = {"version", "features"}
+        unknown_keys = set(config.keys()) - KNOWN_ENGINE_CONFIG_KEYS
         if unknown_keys:
-            print(
+            stderr_logger.warning(
                 f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
-                f"'{engine_name}'. Expected keys: {sorted(_KNOWN_ENGINE_CONFIG_KEYS)}.",
-                file=sys.stderr,
+                f"'{engine_name}'. Expected keys: {sorted(KNOWN_ENGINE_CONFIG_KEYS)}."
             )
 
         if not requested_version:
-            print(
-                f"[wings-accel] Error: 'version' is required for engine '{engine_name}'.",
-                file=sys.stderr,
-            )
+            stderr_logger.error(f"[wings-accel] Error: 'version' is required for engine '{engine_name}'.")
             sys.exit(1)
 
         if not isinstance(requested_features, list):
-            print(
-                f"[wings-accel] Error: 'features' for engine '{engine_name}' must be a list.",
-                file=sys.stderr,
-            )
+            stderr_logger.error(f"[wings-accel] Error: 'features' for engine '{engine_name}' must be a list.")
             sys.exit(1)
 
         # Resolve version with fallback
@@ -414,7 +426,7 @@ Examples:
                 engine_name, requested_version, engines_spec[engine_name]
             )
         except ValueError as e:
-            print(f"[wings-accel] Error: {e}", file=sys.stderr)
+            stderr_logger.error(f"[wings-accel] Error: {e}")
             sys.exit(1)
 
         # Validate features (warn only, don't abort)
