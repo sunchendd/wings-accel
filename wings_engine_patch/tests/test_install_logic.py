@@ -219,7 +219,7 @@ class TestFindLocalWheel(unittest.TestCase):
             os.utime(newer, (2, 2))
 
             with patch.object(install_module, "_LOCAL_WHEEL_DIR", wheel_dir):
-                found = install_module._find_local_whl()
+                found = install_module._find_local_whl()  # Private method for testing # pylint: disable=protected-access
 
             self.assertEqual(found, newer)
 
@@ -263,39 +263,39 @@ def _patch_shared():
     pass
 
 
-class TestExpandFeaturesBySharedPatches(unittest.TestCase):
+class TestExpandFeaturesBySharedPatches(unittest.TestCase):  # pylint: disable=protected-access
     """
     _expand_features_by_shared_patches should automatically include features
     that share propagating patches with the selected set.
     """
 
     def test_shared_patch_triggers_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
+        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
             self._ver_specs_with_shared_patch(), ["feature_x"]
         )
         self.assertIn("feature_x", result)
         self.assertIn("feature_y", result)
 
     def test_no_shared_patch_no_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
+        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
             self._ver_specs_no_shared(), ["feature_x"]
         )
         self.assertEqual(result, {"feature_x"})
 
     def test_non_propagating_patch_blocks_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
+        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
             self._ver_specs_non_propagating(), ["feature_x"]
         )
         self.assertEqual(result, {"feature_x"})
 
     def test_empty_selection_returns_empty(self):
-        result = registry_v1._expand_features_by_shared_patches(
+        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
             self._ver_specs_with_shared_patch(), []
         )
         self.assertEqual(result, set())
 
     def test_selecting_both_features_stays_same(self):
-        result = registry_v1._expand_features_by_shared_patches(
+        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
             self._ver_specs_with_shared_patch(), ["feature_x", "feature_y"]
         )
         self.assertEqual(result, {"feature_x", "feature_y"})
@@ -362,13 +362,12 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
 
     def _run_main_capture_stderr(self, features_json: str) -> str:
         import unittest.mock as mock
+        from contextlib import suppress
         captured = io.StringIO()
         with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
             with mock.patch("sys.stderr", captured):
-                try:
+                with suppress(SystemExit):
                     install_main()
-                except SystemExit:
-                    pass
         return captured.getvalue()
 
 

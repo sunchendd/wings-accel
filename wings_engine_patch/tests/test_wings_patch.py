@@ -92,6 +92,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
         bad_patch.__module__ = 'test_module'
         bad_patch.__name__ = 'bad_patch'
 
+        # pylint: disable=protected-access
         registry_v1._registered_patches['test_engine']['1.0.0']['features']['bad_feat'] = [bad_patch]
         failures = enable('test_engine', ['bad_feat'], version='1.0.0')
         self.assertEqual(len(failures), 1)
@@ -170,6 +171,7 @@ class TestAutoPatchModule(unittest.TestCase):
         exploding_patch.__module__ = 'test_mod'
         exploding_patch.__name__ = 'exploding_patch'
 
+        # pylint: disable=protected-access
         orig = rv1._registered_patches.copy()
         rv1._registered_patches['test_explode'] = {
             '1.0': {
@@ -185,6 +187,7 @@ class TestAutoPatchModule(unittest.TestCase):
                 with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}):
                     importlib.reload(ap_mod)
         finally:
+            # pylint: disable=protected-access
             rv1._registered_patches = orig
         self.assertIn('exploding_patch', buf.getvalue())
 

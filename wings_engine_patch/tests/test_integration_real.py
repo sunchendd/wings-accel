@@ -226,6 +226,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
             code,
             env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ADAPTIVE_DRAFT_OPTIONS},
         )
+        self.assertEqual(rc, 0, "Process should exit successfully")
         self.assertNotIn(
             "[Wings Engine Patch] Critical Error",
             stderr,

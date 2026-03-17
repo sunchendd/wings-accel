@@ -409,7 +409,7 @@ Examples:
         if unknown_keys:
             stderr_logger.warning(
                 f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
-                f"'{engine_name}'. Expected keys: {sorted(KNOWN_ENGINE_CONFIG_KEYS)}."
+                f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
             )
 
         if not requested_version:
