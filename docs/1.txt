@@ -1,0 +1,26 @@
+2个问题单
+2个安全漏洞	DTS2026031300194。
+CVE漏洞类型最低安全版本CVE-2026-22778多模态 RCEvLLM 0.14.1CVE-2026-25960SSRF 绕过vLLM 0.17.0
+1个投机推理草稿模型：40k和128k报错的问题。DTS2026030200142
+
+
+
+* 超大圈复杂度(1
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py
+patched_propose()
+44
+
+超大函数(1)
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py
+patched_propose()
+290
+392
+
+
+函数深度(2)
+wings_engine_patch/build_wheel.py
+6
+_get_version_from_pyproject()
+wings_engine_patch/build_wheel.py
+5
+build_wheel()
