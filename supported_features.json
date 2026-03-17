@@ -6,11 +6,11 @@
     "vllm": {
       "description": "Standard vLLM Inference Engine",
       "versions": {
-        "0.12.0+empty": {
+        "0.17.0": {
           "is_default": true,
           "features": {
-            "hello_world": {
-              "description": "Diagnostic startup log for validating Python auto-patch injection in vLLM"
+            "adaptive_draft_model": {
+              "description": "Enable adaptive draft lengths for pure draft_model speculative decoding on vLLM 0.17.0"
             }
           }
         }

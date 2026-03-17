@@ -152,7 +152,12 @@ class TestValidateFeatures(unittest.TestCase):
         orig = sys.stderr
         sys.stderr = captured
         try:
-            validate_features("myengine", "1.0.0", ["hello_world"], self._version_spec())
+            validate_features(
+                "myengine",
+                "1.0.0",
+                ["adaptive_draft_model"],
+                self._version_spec(),
+            )
         finally:
             sys.stderr = orig
         self.assertEqual(captured.getvalue(), "")
@@ -179,7 +184,7 @@ class TestValidateFeatures(unittest.TestCase):
         self.assertEqual(captured.getvalue(), "")
 
     def _version_spec(self):
-        return {"features": {"hello_world": {}, "metrics": {}}}
+        return {"features": {"adaptive_draft_model": {}, "metrics": {}}}
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +193,15 @@ class TestValidateFeatures(unittest.TestCase):
 
 class TestSupportedFeatureManifest(unittest.TestCase):
 
-    def test_manifest_only_exposes_vllm_hello_world(self):
+    def test_manifest_only_exposes_vllm_adaptive_draft_model(self):
         data = load_supported_features()
         self.assertEqual(set(data["engines"].keys()), {"vllm"})
 
         versions = data["engines"]["vllm"]["versions"]
-        self.assertEqual(set(versions.keys()), {"0.12.0+empty"})
+        self.assertEqual(set(versions.keys()), {"0.17.0"})
 
-        features = versions["0.12.0+empty"]["features"]
-        self.assertEqual(set(features.keys()), {"hello_world"})
+        features = versions["0.17.0"]["features"]
+        self.assertEqual(set(features.keys()), {"adaptive_draft_model"})
 
 
 class TestFindLocalWheel(unittest.TestCase):
@@ -232,8 +237,8 @@ class TestInstallEngine(unittest.TestCase):
                 try:
                     install_module.install_engine(
                         "vllm",
-                        "0.12.0+empty",
-                        ["hello_world"],
+                        "0.17.0",
+                        ["adaptive_draft_model"],
                         dry_run=True,
                     )
                 finally:
@@ -344,14 +349,14 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
     def test_typo_feature_key_warns(self):
         # 'feature' instead of 'features' — should warn
         output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.12.0+empty", "feature": ["hello_world"]}}'
+            '{"vllm": {"version": "0.17.0", "feature": ["adaptive_draft_model"]}}'
         )
         self.assertIn("unknown keys", output.lower())
         self.assertIn("feature", output)
 
     def test_correct_keys_no_warning(self):
         output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+            '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
         )
         self.assertNotIn("unknown keys", output.lower())
 

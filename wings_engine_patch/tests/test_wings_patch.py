@@ -108,11 +108,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
 class TestAutoPatchModule(unittest.TestCase):
     """Unit tests for _auto_patch.py boot-time logic via importlib.reload."""
 
-    HELLO_WORLD_OPTIONS = json.dumps(
-        {'vllm': {'version': '0.12.0+empty', 'features': ['hello_world']}}
+    ADAPTIVE_DRAFT_OPTIONS = json.dumps(
+        {'vllm': {'version': '0.17.0', 'features': ['adaptive_draft_model']}}
     )
-    HELLO_WORLD_LOG = '[Vllm Patch] hello_world patch enabled'
-    HELLO_WORLD_WARNING = "Feature 'hello_world' not found in registry"
+    ADAPTIVE_DRAFT_LOG = '[Vllm Patch] adaptive_draft_model patch enabled'
+    ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
@@ -136,7 +136,7 @@ class TestAutoPatchModule(unittest.TestCase):
         """Config with no 'version' key → Warning, patch not applied."""
         import io
         buf = io.StringIO()
-        opts = json.dumps({'vllm': {'features': ['hello_world']}})
+        opts = json.dumps({'vllm': {'features': ['adaptive_draft_model']}})
         with patch('sys.stderr', buf):
             self._run_auto_patch(opts)
         self.assertIn('missing', buf.getvalue().lower())
@@ -188,34 +188,34 @@ class TestAutoPatchModule(unittest.TestCase):
             rv1._registered_patches = orig
         self.assertIn('exploding_patch', buf.getvalue())
 
-    def test_auto_patch_hello_world_feature_logs(self):
-        """hello_world should emit its startup log when auto-patch enables it."""
+    def test_auto_patch_adaptive_draft_feature_logs(self):
+        """adaptive_draft_model should emit its startup log when auto-patch enables it."""
         import io
 
         buf = io.StringIO()
         with patch('sys.stderr', buf):
-            self._run_auto_patch(self.HELLO_WORLD_OPTIONS)
+            self._run_auto_patch(self.ADAPTIVE_DRAFT_OPTIONS)
 
         stderr = buf.getvalue()
         self.assertNotIn(
-            self.HELLO_WORLD_WARNING,
+            self.ADAPTIVE_DRAFT_WARNING,
             stderr,
-            f"hello_world should be registered, not rejected as missing:\n{stderr}",
+            f"adaptive_draft_model should be registered, not rejected as missing:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_FAILURE_LOG,
             stderr,
-            f"hello_world startup should not report patch failures:\n{stderr}",
+            f"adaptive_draft_model startup should not report patch failures:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_EXECUTION_ERROR_LOG,
             stderr,
-            f"hello_world startup should not report patch execution errors:\n{stderr}",
+            f"adaptive_draft_model startup should not report patch execution errors:\n{stderr}",
         )
         self.assertIn(
-            self.HELLO_WORLD_LOG,
+            self.ADAPTIVE_DRAFT_LOG,
             stderr,
-            'Expected hello_world startup log when auto-patching vllm hello_world',
+            'Expected adaptive_draft_model startup log when auto-patching vllm',
         )
 
     def _run_auto_patch(self, env_value):

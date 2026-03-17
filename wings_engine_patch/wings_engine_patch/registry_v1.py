@@ -15,20 +15,24 @@ from typing import List, Tuple
 #   }
 # }
 
-def _build_vllm_v0_12_0_empty_features():
-    from wings_engine_patch.patch_vllm_container.v0_12_0_empty import hello_world_patch
-    
+def _build_vllm_v0_17_0_features():
+    from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+        adaptive_draft_model_patch,
+    )
+
     return {
-        'features': {
-            'hello_world': [hello_world_patch.patch_vllm_hello_world],
+        "features": {
+            "adaptive_draft_model": [
+                adaptive_draft_model_patch.patch_vllm_adaptive_draft_model,
+            ],
         }
     }
 
 _registered_patches = {
     'vllm': {
-        "0.12.0+empty": {
+        "0.17.0": {
             'is_default': True,
-            'builder': _build_vllm_v0_12_0_empty_features
+            'builder': _build_vllm_v0_17_0_features
         }
     }
 }

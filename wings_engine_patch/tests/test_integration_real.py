@@ -4,7 +4,7 @@ Integration test for the wings-engine-patch monkey-patch framework.
 Verifies:
   1. .pth hook is installed in site-packages
   2. wrapt post-import hook mechanism works (synthetic module)
-  3. the hello_world diagnostic patch can be enabled cleanly for vllm
+  3. the adaptive draft model patch can be enabled cleanly for vllm
   4. _auto_patch.py is triggered by the .pth file on Python startup (subprocess)
 
 Run with:
@@ -156,22 +156,49 @@ class TestWraptHookMechanism(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. Direct patch registration: hello_world
+# 3. Direct patch registration: adaptive_draft_model
 # ---------------------------------------------------------------------------
 
-class TestHelloWorldPatch(unittest.TestCase):
+class TestAdaptiveDraftModelPatch(unittest.TestCase):
 
-    def test_patch_vllm_hello_world_logs_to_stderr(self):
+    def test_patch_vllm_adaptive_draft_model_logs_to_stderr(self):
         import io
         from unittest.mock import patch
 
-        from wings_engine_patch.patch_vllm_container.v0_12_0_empty import hello_world_patch
+        from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+            adaptive_draft_model_patch,
+        )
 
         buf = io.StringIO()
         with patch("sys.stderr", buf):
-            hello_world_patch.patch_vllm_hello_world()
+            adaptive_draft_model_patch.patch_vllm_adaptive_draft_model()
 
-        self.assertIn("[Vllm Patch] hello_world patch enabled", buf.getvalue())
+        self.assertIn(
+            "[Vllm Patch] adaptive_draft_model patch enabled",
+            buf.getvalue(),
+        )
+
+    def test_adaptive_draft_length_controller_adjusts_lengths(self):
+        from wings_engine_patch.patch_vllm_container.v0_17_0.adaptive_draft_model_patch import (
+            AdaptiveDraftLengthController,
+        )
+
+        controller = AdaptiveDraftLengthController([1, 2, 4], initial_length=2)
+
+        self.assertEqual(
+            controller.observe_iteration(
+                num_draft_tokens=8,
+                num_accepted_tokens=8,
+            ),
+            4,
+        )
+        self.assertEqual(
+            controller.observe_iteration(
+                num_draft_tokens=8,
+                num_accepted_tokens=0,
+            ),
+            2,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,9 +214,9 @@ class TestAutoPatchSubprocess(unittest.TestCase):
       - Patch hooks are registered (wrapt hooks are set up)
     """
 
-    HELLO_WORLD_OPTIONS = '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
-    HELLO_WORLD_LOG = '[Vllm Patch] hello_world patch enabled'
-    HELLO_WORLD_WARNING = "Feature 'hello_world' not found in registry"
+    ADAPTIVE_DRAFT_OPTIONS = '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+    ADAPTIVE_DRAFT_LOG = '[Vllm Patch] adaptive_draft_model patch enabled'
+    ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
@@ -197,7 +224,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         code = "print('auto_patch_loaded')"
         rc, stdout, stderr = _run_python(
             code,
-            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.HELLO_WORLD_OPTIONS},
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ADAPTIVE_DRAFT_OPTIONS},
         )
         self.assertNotIn(
             "[Wings Engine Patch] Critical Error",
@@ -210,7 +237,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
 
     def test_auto_patch_missing_version_warns(self):
         """Missing 'version' key in config should produce a warning, not crash."""
-        bad_options = '{"vllm": {"features": ["hello_world"]}}'
+        bad_options = '{"vllm": {"features": ["adaptive_draft_model"]}}'
         code = "import wings_engine_patch._auto_patch; print('ok')"
         rc, stdout, stderr = _run_python(
             code,
@@ -243,34 +270,34 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("ok", stdout, "Expected 'ok' in stdout")
 
-    def test_auto_patch_hello_world_logs_on_startup(self):
-        """hello_world should log to stderr when auto-patch enables it at startup."""
+    def test_auto_patch_adaptive_draft_model_logs_on_startup(self):
+        """adaptive_draft_model should log to stderr when auto-patch enables it at startup."""
         code = "print('startup_probe')"
         rc, stdout, stderr = _run_python(
             code,
-            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.HELLO_WORLD_OPTIONS},
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ADAPTIVE_DRAFT_OPTIONS},
         )
         self.assertEqual(rc, 0, f"Process should not crash. stdout={stdout!r} stderr={stderr!r}")
         self.assertIn("startup_probe", stdout)
         self.assertNotIn(
-            self.HELLO_WORLD_WARNING,
+            self.ADAPTIVE_DRAFT_WARNING,
             stderr,
-            f"hello_world should be registered during startup, not rejected as missing:\n{stderr}",
+            f"adaptive_draft_model should be registered during startup, not rejected as missing:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_FAILURE_LOG,
             stderr,
-            f"hello_world startup should not report patch failures:\n{stderr}",
+            f"adaptive_draft_model startup should not report patch failures:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_EXECUTION_ERROR_LOG,
             stderr,
-            f"hello_world startup should not report patch execution errors:\n{stderr}",
+            f"adaptive_draft_model startup should not report patch execution errors:\n{stderr}",
         )
         self.assertIn(
-            self.HELLO_WORLD_LOG,
+            self.ADAPTIVE_DRAFT_LOG,
             stderr,
-            f"Expected hello_world startup log in stderr, got:\n{stderr}",
+            f"Expected adaptive_draft_model startup log in stderr, got:\n{stderr}",
         )
 
 # ---------------------------------------------------------------------------

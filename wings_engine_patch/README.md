@@ -5,8 +5,8 @@ Wings Engine Patch is a lightweight, dynamic patching framework designed to inje
 ## Key Features
 
 *   **Non-Intrusive**: Patches are applied at runtime using Python's import hooks and `wrapt`, ensuring the original package installation remains pristine.
-*   **Version Controlled**: Patches are strictly scoped to specific engine versions (e.g., `vllm` version `0.12.0+empty`).
-*   **Feature-Based Management**: Patches are grouped into named "features" (for example `hello_world`). Users enable features, not individual files.
+*   **Version Controlled**: Patches are strictly scoped to specific engine versions (e.g., `vllm` version `0.17.0`).
+*   **Feature-Based Management**: Patches are grouped into named "features" (for example `adaptive_draft_model`). Users enable features, not individual files.
 *   **Intelligent Dependency Resolution**:
     *   **Shared Patches**: If multiple features rely on the same underlying patch implementation, enabling one automatically activates the shared components.
     *   **Deduplication**: The engine ensures that any specific patch function is executed exactly once, regardless of how many enabled features require it.
@@ -26,7 +26,7 @@ make install     # build + pip install into current environment
 **Or use the install CLI directly:**
 
 ```bash
-python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
 ```
 
 **Manual (advanced):**
@@ -54,13 +54,13 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `hello_world` verification patch for `vllm` version `0.12.0+empty`:
+To enable the `adaptive_draft_model` patch for `vllm` version `0.17.0`:
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{
     "vllm": {
-        "version": "0.12.0+empty",
-        "features": ["hello_world"]
+        "version": "0.17.0",
+        "features": ["adaptive_draft_model"]
     }
 }'
 
@@ -91,7 +91,7 @@ wings_engine_patch/
     *   Use `wrapt.register_post_import_hook` to safely patch modules *after* they are imported.
 
 2.  **Register the Patch**: Update `wings_engine_patch/registry.py`.
-    *   Import your patch function inside the appropriate version builder function (e.g., `_build_vllm_v0_12_0_empty_features`).
+    *   Import your patch function inside the appropriate version builder function (e.g., `_build_vllm_v0_17_0_features`).
     *   Add the patch function object directly to the feature list.
 
 ### Critical Patch Development Rules & Best Practices
@@ -120,4 +120,4 @@ wings_engine_patch/
 
 ### Feature Propagation and Patch Deduplication
 
-The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In the simplified repository, only the `hello_world` feature is shipped, so there is no multi-feature propagation in normal use.
+The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In the simplified repository, only the `adaptive_draft_model` feature is shipped, so there is no multi-feature propagation in normal use.

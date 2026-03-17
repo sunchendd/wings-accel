@@ -4,7 +4,7 @@ PYTHON  := $(abspath $(VENV)/bin/python)
 PKG_DIR  := wings_engine_patch
 
 # Default features for check/validate targets (override on CLI)
-FEATURES ?= {"vllm":{"version":"0.12.0+empty","features":["hello_world"]}}
+FEATURES ?= {"vllm":{"version":"0.17.0","features":["adaptive_draft_model"]}}
 
 .PHONY: all build install test check validate list clean dev-setup help
 
@@ -23,12 +23,12 @@ test:
 	cd $(PKG_DIR) && python3 -m pytest tests/ -v --tb=short
 
 ## check      — 开发者自验证（验证已安装 patch 可调用）
-##              用法: make check FEATURES='{"vllm":{"version":"0.12.0+empty","features":["hello_world"]}}'
+##              用法: make check FEATURES='{"vllm":{"version":"0.17.0","features":["adaptive_draft_model"]}}'
 check:
 	python3 install.py --check --features '$(FEATURES)'
 
 ## validate   — 校验 JSON + 能力清单（dry-run，不执行安装）
-##              用法: make validate FEATURES='{"vllm":{"version":"0.12.0+empty","features":["hello_world"]}}'
+##              用法: make validate FEATURES='{"vllm":{"version":"0.17.0","features":["adaptive_draft_model"]}}'
 validate:
 	python3 install.py --dry-run --features '$(FEATURES)'
 

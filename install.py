@@ -19,7 +19,7 @@ The --features JSON format:
     }
 
 Example:
-    python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
 """
 
 import argparse
@@ -326,9 +326,9 @@ def main() -> None:
         epilog="""
 Examples:
   python install.py --list
-  python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
-  python install.py --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}' --dry-run
-  python install.py --check --features '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}' --dry-run
+  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
 """,
     )
     parser.add_argument(
