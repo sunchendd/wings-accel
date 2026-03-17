@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import install as install_module
 from install import (
@@ -107,14 +107,6 @@ class TestValidateSchema(unittest.TestCase):
 
 class TestResolveVersion(unittest.TestCase):
 
-    def _spec(self):
-        return {
-            "versions": {
-                "1.0.0": {"is_default": False, "features": {"f1": {}}},
-                "2.0.0": {"is_default": True,  "features": {"f2": {}}},
-            }
-        }
-
     def test_exact_match(self):
         ver, spec = resolve_version("myengine", "1.0.0", self._spec())
         self.assertEqual(ver, "1.0.0")
@@ -140,15 +132,20 @@ class TestResolveVersion(unittest.TestCase):
         ver, spec = resolve_version("myengine", "1.0.0", self._spec())
         self.assertEqual(ver, "1.0.0")
 
+    def _spec(self):
+        return {
+            "versions": {
+                "1.0.0": {"is_default": False, "features": {"f1": {}}},
+                "2.0.0": {"is_default": True, "features": {"f2": {}}},
+            }
+        }
+
 
 # ---------------------------------------------------------------------------
 # validate_features
 # ---------------------------------------------------------------------------
 
 class TestValidateFeatures(unittest.TestCase):
-
-    def _version_spec(self):
-        return {"features": {"hello_world": {}, "metrics": {}}}
 
     def test_known_feature_produces_no_warning(self):
         captured = io.StringIO()
@@ -180,6 +177,9 @@ class TestValidateFeatures(unittest.TestCase):
         finally:
             sys.stderr = orig
         self.assertEqual(captured.getvalue(), "")
+
+    def _version_spec(self):
+        return {"features": {"hello_world": {}, "metrics": {}}}
 
 
 # ---------------------------------------------------------------------------
@@ -244,15 +244,15 @@ class TestInstallEngine(unittest.TestCase):
         self.assertIn(str(wheel_path), output)
 
 
-# ---------------------------------------------------------------------------
-# _expand_features_by_shared_patches (registry_v1)
-# ---------------------------------------------------------------------------
+
 
 def _patch_a():
     pass
 
+
 def _patch_b():
     pass
+
 
 def _patch_shared():
     pass
@@ -263,6 +263,37 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):
     _expand_features_by_shared_patches should automatically include features
     that share propagating patches with the selected set.
     """
+
+    def test_shared_patch_triggers_expansion(self):
+        result = registry_v1._expand_features_by_shared_patches(
+            self._ver_specs_with_shared_patch(), ["feature_x"]
+        )
+        self.assertIn("feature_x", result)
+        self.assertIn("feature_y", result)
+
+    def test_no_shared_patch_no_expansion(self):
+        result = registry_v1._expand_features_by_shared_patches(
+            self._ver_specs_no_shared(), ["feature_x"]
+        )
+        self.assertEqual(result, {"feature_x"})
+
+    def test_non_propagating_patch_blocks_expansion(self):
+        result = registry_v1._expand_features_by_shared_patches(
+            self._ver_specs_non_propagating(), ["feature_x"]
+        )
+        self.assertEqual(result, {"feature_x"})
+
+    def test_empty_selection_returns_empty(self):
+        result = registry_v1._expand_features_by_shared_patches(
+            self._ver_specs_with_shared_patch(), []
+        )
+        self.assertEqual(result, set())
+
+    def test_selecting_both_features_stays_same(self):
+        result = registry_v1._expand_features_by_shared_patches(
+            self._ver_specs_with_shared_patch(), ["feature_x", "feature_y"]
+        )
+        self.assertEqual(result, {"feature_x", "feature_y"})
 
     def _ver_specs_with_shared_patch(self):
         """
@@ -297,37 +328,6 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):
             "non_propagating_patches": {_patch_shared},
         }
 
-    def test_shared_patch_triggers_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
-            self._ver_specs_with_shared_patch(), ["feature_x"]
-        )
-        self.assertIn("feature_x", result)
-        self.assertIn("feature_y", result)
-
-    def test_no_shared_patch_no_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
-            self._ver_specs_no_shared(), ["feature_x"]
-        )
-        self.assertEqual(result, {"feature_x"})
-
-    def test_non_propagating_patch_blocks_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(
-            self._ver_specs_non_propagating(), ["feature_x"]
-        )
-        self.assertEqual(result, {"feature_x"})
-
-    def test_empty_selection_returns_empty(self):
-        result = registry_v1._expand_features_by_shared_patches(
-            self._ver_specs_with_shared_patch(), []
-        )
-        self.assertEqual(result, set())
-
-    def test_selecting_both_features_stays_same(self):
-        result = registry_v1._expand_features_by_shared_patches(
-            self._ver_specs_with_shared_patch(), ["feature_x", "feature_y"]
-        )
-        self.assertEqual(result, {"feature_x", "feature_y"})
-
 
 # ---------------------------------------------------------------------------
 # Unknown key warning in --features config
@@ -340,17 +340,6 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
     This test exercises the warning path indirectly by simulating the main() argument
     parsing with patched sys.argv.
     """
-
-    def _run_main_capture_stderr(self, features_json: str) -> str:
-        import unittest.mock as mock
-        captured = io.StringIO()
-        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
-            with mock.patch("sys.stderr", captured):
-                try:
-                    install_main()
-                except SystemExit:
-                    pass
-        return captured.getvalue()
 
     def test_typo_feature_key_warns(self):
         # 'feature' instead of 'features' — should warn
@@ -365,6 +354,17 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
             '{"vllm": {"version": "0.12.0+empty", "features": ["hello_world"]}}'
         )
         self.assertNotIn("unknown keys", output.lower())
+
+    def _run_main_capture_stderr(self, features_json: str) -> str:
+        import unittest.mock as mock
+        captured = io.StringIO()
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with mock.patch("sys.stderr", captured):
+                try:
+                    install_main()
+                except SystemExit:
+                    pass
+        return captured.getvalue()
 
 
 if __name__ == "__main__":

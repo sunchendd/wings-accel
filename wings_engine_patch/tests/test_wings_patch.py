@@ -106,7 +106,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
 
 class TestAutoPatchModule(unittest.TestCase):
-    """Unit tests for _auto_patch.py boot-time logic via importlib reload."""
+    """Unit tests for _auto_patch.py boot-time logic via importlib.reload."""
 
     HELLO_WORLD_OPTIONS = json.dumps(
         {'vllm': {'version': '0.12.0+empty', 'features': ['hello_world']}}
@@ -115,21 +115,6 @@ class TestAutoPatchModule(unittest.TestCase):
     HELLO_WORLD_WARNING = "Feature 'hello_world' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
-
-    def _run_auto_patch(self, env_value):
-        """Execute _auto_patch module-level code with a given env var value."""
-        import importlib
-        import wings_engine_patch._auto_patch as ap_mod
-
-        env_patch = {}
-        if env_value is None:
-            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': ''}
-        else:
-            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': env_value}
-
-        with patch.dict(os.environ, env_patch, clear=False):
-            # Reload triggers the module-level try/except block again
-            importlib.reload(ap_mod)
 
     def test_auto_patch_no_env_var_is_silent(self):
         """No env var → no error, no output."""
@@ -232,6 +217,21 @@ class TestAutoPatchModule(unittest.TestCase):
             stderr,
             'Expected hello_world startup log when auto-patching vllm hello_world',
         )
+
+    def _run_auto_patch(self, env_value):
+        """Execute _auto_patch module-level code with a given env var value."""
+        import importlib
+        import wings_engine_patch._auto_patch as ap_mod
+
+        env_patch = {}
+        if env_value is None:
+            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': ''}
+        else:
+            env_patch = {'WINGS_ENGINE_PATCH_OPTIONS': env_value}
+
+        with patch.dict(os.environ, env_patch, clear=False):
+            # Reload triggers the module-level try/except block again
+            importlib.reload(ap_mod)
 
 
 if __name__ == '__main__':

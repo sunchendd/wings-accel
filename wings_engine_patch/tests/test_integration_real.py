@@ -28,7 +28,7 @@ import unittest
 logging.basicConfig(level=logging.INFO, format='[TEST] %(message)s')
 logger = logging.getLogger(__name__)
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +219,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertIn("Warning", stderr,
                       f"Expected warning for missing version, got stderr:\n{stderr}")
         self.assertEqual(rc, 0, "Process should not crash on bad config")
+        self.assertIn("ok", stdout, "Expected 'ok' in stdout")
 
     def test_auto_patch_bad_json_warns(self):
         """Malformed JSON should warn but not crash."""
@@ -229,6 +230,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         )
         self.assertIn("Warning", stderr)
         self.assertEqual(rc, 0)
+        self.assertIn("ok", stdout, "Expected 'ok' in stdout")
 
     def test_auto_patch_unknown_engine_warns(self):
         """Unknown engine name should warn but not crash."""
@@ -239,6 +241,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         )
         self.assertIn("Warning", stderr)
         self.assertEqual(rc, 0)
+        self.assertIn("ok", stdout, "Expected 'ok' in stdout")
 
     def test_auto_patch_hello_world_logs_on_startup(self):
         """hello_world should log to stderr when auto-patch enables it at startup."""

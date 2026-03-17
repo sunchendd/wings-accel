@@ -196,7 +196,7 @@ def install_engine(
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
         stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
-        sys.exit(e.returncode)
+        raise
 
     _print_env_hint(engine_name, version, features)
 
@@ -404,8 +404,8 @@ Examples:
         requested_version = config.get("version")
         requested_features = config.get("features", [])
 
-        KNOWN_ENGINE_CONFIG_KEYS = {"version", "features"}
-        unknown_keys = set(config.keys()) - KNOWN_ENGINE_CONFIG_KEYS
+        known_engine_config_keys = {"version", "features"}
+        unknown_keys = set(config.keys()) - known_engine_config_keys
         if unknown_keys:
             stderr_logger.warning(
                 f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
