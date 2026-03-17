@@ -8,8 +8,9 @@ import subprocess
 import zipfile
 import argparse
 
-def build_wheel(outdir="dist"):
-    # Clean previous builds
+
+def _clean_previous_builds(outdir: str) -> None:
+    """Clean previous build artifacts."""
     if outdir == "dist" and os.path.exists("dist"):
         shutil.rmtree("dist")
     if os.path.exists("build"):
@@ -17,6 +18,45 @@ def build_wheel(outdir="dist"):
     if os.path.exists("wings_engine_patch.egg-info"):
         shutil.rmtree("wings_engine_patch.egg-info")
 
+
+def _get_version_from_pyproject() -> str:
+    """Extract version from pyproject.toml file."""
+    version = "1.0.0"  # fallback
+    pyproject_path = "pyproject.toml"
+    
+    if not os.path.exists(pyproject_path):
+        return version
+    
+    # Try to import tomllib or tomli
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore
+        except ImportError:
+            tomllib = None
+    
+    if tomllib:
+        with open(pyproject_path, "rb") as tf:
+            pyproject = tomllib.load(tf)
+            version = pyproject.get("project", {}).get("version", version)
+    else:
+        # Plain string search fallback
+        with open(pyproject_path) as tf:
+            for line in tf:
+                line = line.strip()
+                if line.startswith("version") and "=" in line:
+                    candidate = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if candidate:
+                        version = candidate
+                        break
+    return version
+
+
+def build_wheel(outdir="dist"):
+    # Clean previous builds
+    _clean_previous_builds(outdir)
+    
     os.makedirs(outdir, exist_ok=True)
     for old_wheel in glob.glob(os.path.join(outdir, "*.whl")):
         os.remove(old_wheel)
@@ -35,32 +75,9 @@ def build_wheel(outdir="dist"):
     # For a pure python package, it's usually 'purelib'.
     # We need to construct the path 'wings_engine_patch-{version}.data/purelib/wings_engine_patch.pth'
     
-    # Get version dynamically from pyproject.toml (primary), fallback to setup.py via AST
-    version = "1.0.0"  # fallback
-    pyproject_path = "pyproject.toml"
-    if os.path.exists(pyproject_path):
-        try:
-            import tomllib  # Python 3.11+
-        except ImportError:
-            try:
-                import tomli as tomllib  # type: ignore
-            except ImportError:
-                tomllib = None
-
-        if tomllib:
-            with open(pyproject_path, "rb") as tf:
-                pyproject = tomllib.load(tf)
-            version = pyproject.get("project", {}).get("version", version)
-        else:
-            # Plain string search fallback for environments without tomllib/tomli
-            with open(pyproject_path) as tf:
-                for line in tf:
-                    line = line.strip()
-                    if line.startswith("version") and "=" in line:
-                        candidate = line.split("=", 1)[1].strip().strip('"').strip("'")
-                        if candidate:
-                            version = candidate
-                            break
+    # Get version dynamically from pyproject.toml
+    version = _get_version_from_pyproject()
+    
     package_name = "wings_engine_patch"
     data_dir = f"{package_name}-{version}.data"
     destination_path = f"{data_dir}/purelib/wings_engine_patch.pth"
