@@ -15,6 +15,7 @@ or:
 
 import importlib
 import importlib.util
+import logging
 import os
 import site
 import subprocess
@@ -22,6 +23,10 @@ import sys
 import textwrap
 import types
 import unittest
+
+# Configure logging for tests
+logging.basicConfig(level=logging.INFO, format='[TEST] %(message)s')
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -201,7 +206,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         )
         self.assertIn("auto_patch_loaded", stdout,
                       f"auto_patch did not complete. stdout={stdout!r} stderr={stderr!r}")
-        print(f"\n  [OK] _auto_patch ran without critical error")
+        logger.info(f"\n  [OK] _auto_patch ran without critical error")
 
     def test_auto_patch_missing_version_warns(self):
         """Missing 'version' key in config should produce a warning, not crash."""
