@@ -370,7 +370,7 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
         captured = io.StringIO()
         with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
             with mock.patch("sys.stderr", captured):
-                with suppress(SystemExit):
+                with suppress(SystemExit):  # pylint: disable=avoid-using-exit
                     install_main()
         return captured.getvalue()
 
