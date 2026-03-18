@@ -23,7 +23,7 @@ class TestBuildWheelHelpers(unittest.TestCase):
             try:
                 os.chdir(tmpdir)
                 with patch.object(build_wheel, "_load_tomllib", return_value=None):
-                    self.assertEqual(build_wheel._get_version_from_pyproject(), "2.3.4")
+                    self.assertEqual(build_wheel._get_version_from_pyproject(), "2.3.4")  # pylint: disable=protected-access
             finally:
                 os.chdir(previous_cwd)
 
