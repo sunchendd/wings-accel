@@ -8,6 +8,11 @@ mkdir -p "${OUTPUT_DIR}"
 find "${OUTPUT_DIR}" -mindepth 1 -maxdepth 1 -type f -delete
 
 cd "${ROOT_DIR}/wings_engine_patch"
+
+echo "[wings-accel] Installing dev dependencies..."
+pip install -q -r "${ROOT_DIR}/requirements-dev.txt"
+
+echo "[wings-accel] Building wheel..."
 python3 build_wheel.py --outdir "${OUTPUT_DIR}"
 
 cp "${ROOT_DIR}/install.py" "${OUTPUT_DIR}/install.py"
