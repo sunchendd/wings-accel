@@ -116,19 +116,34 @@ class TestResolveVersion(unittest.TestCase):
         self.assertEqual(ver, "1.0.0")
         self.assertFalse(spec["is_default"])
 
-    def test_fallback_to_default(self):
-        ver, spec = resolve_version("myengine", "9.9.9", self._spec())
+    def test_future_version_warns_and_falls_back_to_default(self):
+        captured = io.StringIO()
+        orig = sys.stderr
+        sys.stderr = captured
+        try:
+            ver, spec = resolve_version("myengine", "9.9.9", self._spec())
+        finally:
+            sys.stderr = orig
         self.assertEqual(ver, "2.0.0")
         self.assertTrue(spec["is_default"])
+        self.assertIn("newer than the highest validated version", captured.getvalue())
 
-    def test_no_default_raises(self):
+    def test_old_version_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            resolve_version("myengine", "0.9.0", self._spec())
+        self.assertIn("Historical versions are not supported", str(ctx.exception))
+
+    def test_unvalidated_gap_version_raises(self):
         spec = {
             "versions": {
-                "1.0.0": {"is_default": False, "features": {}},
+                "1.0.0": {"is_default": False, "features": {"f1": {}}},
+                "2.0.0": {"is_default": True, "features": {"f2": {}}},
+                "3.0.0": {"is_default": False, "features": {"f3": {}}},
             }
         }
-        with self.assertRaises(ValueError):
-            resolve_version("myengine", "9.9.9", spec)
+        with self.assertRaises(ValueError) as ctx:
+            resolve_version("myengine", "2.5.0", spec)
+        self.assertIn("not a validated patched version", str(ctx.exception))
 
     def test_exact_match_preferred_over_default(self):
         # Both 1.0.0 and 2.0.0 exist; requesting 1.0.0 should return 1.0.0,

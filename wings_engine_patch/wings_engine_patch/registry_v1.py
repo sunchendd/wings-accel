@@ -1,6 +1,9 @@
 import sys
 import threading
+from dataclasses import dataclass
 from typing import List, Tuple
+
+from packaging.version import InvalidVersion, Version
 
 # Structure: 
 # {
@@ -38,6 +41,106 @@ _registered_patches = {
 }
 
 _builder_lock = threading.Lock()
+
+
+class PatchVersionError(RuntimeError):
+    """Base class for runtime version-policy failures."""
+
+
+class UnsupportedVersionError(PatchVersionError):
+    """Requested a version that is explicitly unsupported."""
+
+
+class ForwardCompatibilityPatchError(PatchVersionError):
+    """Fallback patching for a newer, unvalidated version did not succeed."""
+
+
+@dataclass(frozen=True)
+class VersionSelection:
+    requested_version: str
+    resolved_version: str
+    ver_specs: dict
+    resolution_kind: str
+
+
+def _get_default_version_spec(inference_engine: str, engine_specs: dict) -> tuple[str, dict]:
+    for version_str, specs in engine_specs.items():
+        if specs.get("is_default", False):
+            return version_str, specs
+    raise UnsupportedVersionError(
+        f"Engine '{inference_engine}' has no default patch version configured."
+    )
+
+
+def _parse_registered_versions(
+    inference_engine: str,
+    engine_specs: dict,
+) -> list[tuple[Version, str, dict]]:
+    parsed_versions: list[tuple[Version, str, dict]] = []
+    for version_str, specs in engine_specs.items():
+        try:
+            parsed_versions.append((Version(version_str), version_str, specs))
+        except InvalidVersion as exc:
+            raise UnsupportedVersionError(
+                f"Registered patch version '{version_str}' for engine '{inference_engine}' "
+                "is not PEP 440 compatible."
+            ) from exc
+    parsed_versions.sort(key=lambda item: item[0])
+    return parsed_versions
+
+
+def _select_version(inference_engine: str, requested_version: str, engine_specs: dict) -> VersionSelection:
+    if requested_version in engine_specs:
+        return VersionSelection(
+            requested_version=requested_version,
+            resolved_version=requested_version,
+            ver_specs=engine_specs[requested_version],
+            resolution_kind="exact",
+        )
+
+    try:
+        requested = Version(requested_version)
+    except InvalidVersion as exc:
+        raise UnsupportedVersionError(
+            f"Requested version '{requested_version}' for engine '{inference_engine}' is not a "
+            "valid PEP 440 version."
+        ) from exc
+
+    parsed_versions = _parse_registered_versions(inference_engine, engine_specs)
+    if not parsed_versions:
+        raise UnsupportedVersionError(
+            f"Engine '{inference_engine}' has no registered patch versions."
+        )
+
+    min_supported, min_version_str, _ = parsed_versions[0]
+    max_supported, max_version_str, _ = parsed_versions[-1]
+
+    if requested < min_supported:
+        raise UnsupportedVersionError(
+            f"Requested version '{requested_version}' for engine '{inference_engine}' is older "
+            f"than the minimum supported patched version '{min_version_str}'. Historical versions "
+            "are not supported."
+        )
+
+    if requested > max_supported:
+        resolved_version, ver_specs = _get_default_version_spec(inference_engine, engine_specs)
+        print(
+            f"[Wings Engine Patch] Warning: Requested version '{requested_version}' is newer than "
+            f"highest validated version '{max_version_str}' for engine '{inference_engine}'. "
+            f"Trying default patch set '{resolved_version}'.",
+            file=sys.stderr,
+        )
+        return VersionSelection(
+            requested_version=requested_version,
+            resolved_version=resolved_version,
+            ver_specs=ver_specs,
+            resolution_kind="future_fallback",
+        )
+
+    raise UnsupportedVersionError(
+        f"Requested version '{requested_version}' for engine '{inference_engine}' is not a "
+        f"validated patched version. Supported versions: {sorted(engine_specs.keys())}."
+    )
 
 
 def _ensure_features_loaded(ver_specs):
@@ -109,29 +212,22 @@ def enable(inference_engine: str, features: List[str], version: str) -> List[Tup
 
     engine_specs = _registered_patches.get(inference_engine)
     if not engine_specs:
-         print(f"[Wings Engine Patch] Warning: Engine '{inference_engine}' is not registered.", file=sys.stderr)
-         return failures
+        print(f"[Wings Engine Patch] Warning: Engine '{inference_engine}' is not registered.", file=sys.stderr)
+        return failures
 
-    # Resolve Version and Hydrate Specs
-    ver_specs = engine_specs.get(version)
-    used_version = version 
-    
-    if not ver_specs:
-        for ver, specs in engine_specs.items():
-            if specs.get('is_default', False):
-                ver_specs = specs
-                used_version = ver
-                print(f"[Wings Engine Patch] Info: Version mismatch ({version} requested). Using default version '{used_version}' (Engine: {inference_engine}).", file=sys.stderr)
-                break
-    
-    if not ver_specs:
-         print(f"[Wings Engine Patch] Warning: Version '{version}' (and no default) not found in registry for {inference_engine}.", file=sys.stderr)
-         return failures
+    selection = _select_version(inference_engine, version, engine_specs)
+    ver_specs = selection.ver_specs
+    used_version = selection.resolved_version
 
     # Load features/imports lazily
     try:
         _ensure_features_loaded(ver_specs)
     except ImportError as e:
+        if selection.resolution_kind == "future_fallback":
+            raise ForwardCompatibilityPatchError(
+                f"Requested version '{version}' is newer than the validated patch set. "
+                f"Tried default patch set '{used_version}', but loading patches failed: {e}"
+            ) from e
         print(f"[Wings Engine Patch] Error loading patches for {inference_engine}@{used_version}: {e}", file=sys.stderr)
         return failures
 
@@ -161,5 +257,12 @@ def enable(inference_engine: str, features: List[str], version: str) -> List[Tup
             patch_name = f"{patch_func.__module__}.{patch_func.__name__}"
             print(f"[Wings Engine Patch] Error executing patch {patch_name}: {e}", file=sys.stderr)
             failures.append((patch_name, e))
+
+    if selection.resolution_kind == "future_fallback" and failures:
+        failed_patch_names = ", ".join(patch_name for patch_name, _ in failures)
+        raise ForwardCompatibilityPatchError(
+            f"Requested version '{version}' is newer than the validated patch set. "
+            f"Tried default patch set '{used_version}', but patching failed: {failed_patch_names}"
+        ) from failures[0][1]
 
     return failures

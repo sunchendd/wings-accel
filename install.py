@@ -28,6 +28,7 @@ import logging
 import subprocess
 import sys
 from pathlib import Path
+from packaging.version import InvalidVersion, Version
 
 
 class _StreamProxy:
@@ -113,29 +114,90 @@ def validate_schema(data: dict) -> None:
 # Version resolution
 # ---------------------------------------------------------------------------
 
+def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, dict]:
+    for ver, spec in versions.items():
+        if spec.get("is_default", False):
+            return ver, spec
+    raise ValueError(
+        f"Engine '{engine_name}' has no default version (is_default: true). "
+        "Exactly one version must be marked as default."
+    )
+
+
+def _parse_supported_versions(engine_name: str, versions: dict) -> list[tuple[Version, str, dict]]:
+    parsed_versions: list[tuple[Version, str, dict]] = []
+    for version_str, spec in versions.items():
+        try:
+            parsed_versions.append((Version(version_str), version_str, spec))
+        except InvalidVersion as exc:
+            raise ValueError(
+                f"Engine '{engine_name}' declares unsupported version string '{version_str}' "
+                "that is not PEP 440 compatible."
+            ) from exc
+    parsed_versions.sort(key=lambda item: item[0])
+    return parsed_versions
+
+
+def _classify_requested_version(
+    engine_name: str,
+    requested_version: str,
+    versions: dict,
+) -> tuple[str, str, dict]:
+    if requested_version in versions:
+        return "exact", requested_version, versions[requested_version]
+
+    try:
+        requested = Version(requested_version)
+    except InvalidVersion as exc:
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is not a valid PEP 440 version."
+        ) from exc
+
+    parsed_versions = _parse_supported_versions(engine_name, versions)
+    if not parsed_versions:
+        raise ValueError(f"Engine '{engine_name}' has no versions defined.")
+
+    min_supported, min_version_str, _ = parsed_versions[0]
+    max_supported, max_version_str, _ = parsed_versions[-1]
+
+    if requested < min_supported:
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is older than the minimum "
+            f"supported patched version '{min_version_str}'. Historical versions are not supported."
+        )
+
+    if requested > max_supported:
+        default_version, default_spec = _get_default_version_spec(engine_name, versions)
+        return "future_fallback", default_version, default_spec
+
+    raise ValueError(
+        f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
+        f"Supported versions: {sorted(versions.keys())}."
+    )
+
+
 def resolve_version(engine_name: str, requested_version: str, engine_spec: dict):
-    """Resolve version with default fallback per §3.3.6.4.5.2.
+    """Resolve version with explicit old-version rejection and future fallback.
 
     Returns (resolved_version_str, version_spec_dict).
     """
     versions = engine_spec.get("versions", {})
-
-    if requested_version in versions:
-        return requested_version, versions[requested_version]
-
-# Fallback: find the default version
-    for ver, spec in versions.items():
-        if spec.get("is_default", False):
-            stderr_logger.warning(
-                f"[wings-accel] Warning: version '{requested_version}' not found for engine "
-                f"'{engine_name}'. Falling back to default version '{ver}'."
-            )
-            return ver, spec
-
-    raise ValueError(
-        f"Version '{requested_version}' not found for engine '{engine_name}' "
-        "and no default version is configured."
+    resolution_kind, resolved_version, version_spec = _classify_requested_version(
+        engine_name,
+        requested_version,
+        versions,
     )
+
+    if resolution_kind == "future_fallback":
+        supported_versions = _parse_supported_versions(engine_name, versions)
+        highest_validated_version = supported_versions[-1][1]
+        stderr_logger.warning(
+            f"[wings-accel] Warning: version '{requested_version}' is newer than the highest "
+            f"validated version '{highest_validated_version}' for engine '{engine_name}'. "
+            f"Trying default version '{resolved_version}'."
+        )
+
+    return resolved_version, version_spec
 
 
 # ---------------------------------------------------------------------------
@@ -257,25 +319,34 @@ def check_installed(
         return False
     logger.info(f"  ✅ Engine '{engine_name}' registered in patch registry")
 
-    # 3. version (exact or default)?
+    # 3. version policy
     engine_versions = registry[engine_name]
-    if version in engine_versions:
-        ver_spec = engine_versions[version]
+    try:
+        resolution_kind, resolved_version, ver_spec = _classify_requested_version(
+            engine_name,
+            version,
+            engine_versions,
+        )
+    except ValueError as exc:
+        stderr_logger.error(f"  ❌ {exc}")
+        return False
+
+    if resolution_kind == "exact":
         logger.info(f"  ✅ Version '{version}' found")
     else:
-        defaults = {v: s for v, s in engine_versions.items() if s.get("is_default", False)}
-        if defaults:
-            default_ver = next(iter(defaults))
-            logger.warning(f"  ⚠️  Version '{version}' not in registry; default is '{default_ver}'")
-            ver_spec = defaults[default_ver]
-        else:
-            stderr_logger.error(f"  ❌ Version '{version}' not found and no default configured.")
-            return False
+        supported_versions = _parse_supported_versions(engine_name, engine_versions)
+        highest_validated_version = supported_versions[-1][1]
+        logger.warning(
+            f"  ⚠️  Version '{version}' is newer than highest validated version "
+            f"'{highest_validated_version}'; trying default '{resolved_version}'"
+        )
 
     # 4. features declared / builder present?
     has_spec = "builder" in ver_spec or "features" in ver_spec
     if not has_spec:
-        stderr_logger.error(f"  ❌ No patch spec (builder or features) for {engine_name}@{version}.")
+        stderr_logger.error(
+            f"  ❌ No patch spec (builder or features) for {engine_name}@{resolved_version}."
+        )
         return False
     logger.info("  ✅ Patch spec available (lazy builder or pre-loaded features)")
 

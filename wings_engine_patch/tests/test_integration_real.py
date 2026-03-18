@@ -28,7 +28,8 @@ import unittest
 logging.basicConfig(level=logging.INFO, format='[TEST] %(message)s')
 logger = logging.getLogger(__name__)
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, PACKAGE_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -38,6 +39,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 def _run_python(code: str, env_extra: dict = None) -> tuple[int, str, str]:
     """Run a Python snippet in a clean subprocess, return (returncode, stdout, stderr)."""
     env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [PACKAGE_ROOT, env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
     if env_extra:
         env.update(env_extra)
     proc = subprocess.run(
@@ -262,6 +266,28 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertIn("Warning", stderr)
         self.assertEqual(rc, 0)
         self.assertIn("ok", stdout, "Expected 'ok' in stdout")
+
+    def test_auto_patch_old_version_fails_clearly(self):
+        code = "print('should_not_reach')"
+        rc, stdout, stderr = _run_python(
+            code,
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": '{"vllm": {"version": "0.12.0", "features": ["adaptive_draft_model"]}}'},
+        )
+        self.assertNotEqual(rc, 0, "Historical unsupported versions should fail the process")
+        self.assertNotIn("should_not_reach", stdout)
+        self.assertIn("Historical versions are not supported", stderr)
+
+    def test_auto_patch_future_version_warns_and_falls_back(self):
+        code = "print('startup_probe')"
+        rc, stdout, stderr = _run_python(
+            code,
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": '{"vllm": {"version": "0.18.0", "features": ["adaptive_draft_model"]}}'},
+        )
+        self.assertEqual(rc, 0, f"Future-version fallback should succeed. stdout={stdout!r} stderr={stderr!r}")
+        self.assertIn("startup_probe", stdout)
+        self.assertIn("newer than highest validated version", stderr)
+        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
 
     def test_auto_patch_adaptive_draft_model_logs_on_startup(self):
         """adaptive_draft_model should log to stderr when auto-patch enables it at startup."""
