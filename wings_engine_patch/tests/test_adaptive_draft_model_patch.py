@@ -158,7 +158,8 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
             def _update_states_after_model_execute(self, *args, **kwargs):
                 return None
 
-            def _get_draft_token_ids_cpu(self):
+            @staticmethod
+def _get_draft_token_ids_cpu():
                 return (
                     [
                         [22160, 47116, 374, -1],
@@ -174,7 +175,7 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)
 
         runner = fake_module.GPUModelRunner()
-        draft_token_ids, req_ids = runner._get_draft_token_ids_cpu()
+        draft_token_ids, req_ids = runner._get_draft_token_ids_cpu()  # pylint: disable=protected-access
 
         self.assertEqual(req_ids, ["r1", "r2", "r3", "r4"])
         self.assertEqual(
