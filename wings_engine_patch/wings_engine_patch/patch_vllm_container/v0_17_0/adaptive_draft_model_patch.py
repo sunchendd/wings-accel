@@ -552,7 +552,7 @@ def _run_iteration_forward_pass(
     clamped_positions,
 ):
     instance.input_ids[: state.batch_size] = input_ids
-    _call_member(instance, "_set_positions", state.batch_size, clamped_positions)
+    _call_member(instance, "_set_positions", state.batch_size, clamped_positions)  # pylint: disable=function-ret
     instance.hidden_states[: state.batch_size] = state.hidden_states
     if instance.supports_mm_inputs:
         instance.inputs_embeds[: state.batch_size] = instance.model.embed_input_ids(
@@ -609,7 +609,7 @@ def _advance_confidence_filtered_step(
         active_mask=active_mask,
         token_index=token_index,
     )
-    _refresh_per_layer_attn_metadata(
+    _ = _refresh_per_layer_attn_metadata(
         instance,
         common_attn_metadata=state.common_attn_metadata,
         per_layer_attn_metadata=state.per_layer_attn_metadata,
