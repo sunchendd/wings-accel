@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, PACKAGE_ROOT)
+sys.path.append(PACKAGE_ROOT)
 
 import build_wheel
 
