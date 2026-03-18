@@ -123,7 +123,11 @@ def _build_record_contents(
     )
 
 
-def _copy_wheel_items_excluding_record(source_wheel: zipfile.ZipFile, dest_wheel: zipfile.ZipFile, record_name: str) -> None:
+def _copy_wheel_items_excluding_record(
+    source_wheel: zipfile.ZipFile,
+    dest_wheel: zipfile.ZipFile,
+    record_name: str,
+) -> None:
     dest_wheel.comment = source_wheel.comment
     for item in source_wheel.infolist():
         if item.filename == record_name:

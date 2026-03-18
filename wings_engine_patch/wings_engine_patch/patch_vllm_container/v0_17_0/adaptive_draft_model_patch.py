@@ -741,7 +741,7 @@ def _patch_arg_utils_module(module) -> None:
             )
         return spec_config
 
-    patched_create_speculative_config._wings_adaptive_draft_patched = True
+    patched_create_speculative_config._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
     module.EngineArgs.create_speculative_config = patched_create_speculative_config
 
 
@@ -769,7 +769,7 @@ def _patch_gpu_model_runner_module(module) -> None:
                     self.draft_length = self.draft_length_controller.current_length
                     self.uniform_decode_query_len = 1
 
-            patched_init._wings_adaptive_draft_patched = True
+            patched_init._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
             runner_cls.__init__ = patched_init
 
     module.AdaptiveDraftLengthController = AdaptiveDraftLengthController
@@ -812,7 +812,7 @@ def _patch_gpu_model_runner_module(module) -> None:
                     )
         return result
 
-    patched_update_states_after_model_execute._wings_adaptive_draft_patched = True
+    patched_update_states_after_model_execute._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
     setattr(
         runner_cls,
         "_update_states_after_model_execute",
@@ -842,7 +842,7 @@ def _patch_gpu_model_runner_module(module) -> None:
             draft_token_ids = trimmed_draft_token_ids
         return draft_token_ids, req_ids
 
-    patched_get_draft_token_ids_cpu._wings_adaptive_draft_patched = True
+    patched_get_draft_token_ids_cpu._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
     setattr(runner_cls, "_get_draft_token_ids_cpu", patched_get_draft_token_ids_cpu)
 
 
