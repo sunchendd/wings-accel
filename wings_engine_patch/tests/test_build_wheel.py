@@ -37,7 +37,7 @@ class TestBuildWheelHelpers(unittest.TestCase):
                 wheel.writestr("wings_engine_patch/__init__.py", "__version__ = '1.0.0'\n")
                 wheel.writestr(record_name, f"{record_name},,\n")
 
-            build_wheel._repack_wheel_with_pth(wheel_path, destination_path)
+            build_wheel._repack_wheel_with_pth(wheel_path, destination_path)  # pylint: disable=protected-access
 
             with zipfile.ZipFile(wheel_path, "r") as wheel:
                 self.assertIn(destination_path, wheel.namelist())
@@ -45,7 +45,7 @@ class TestBuildWheelHelpers(unittest.TestCase):
                 record_contents = wheel.read(record_name).decode("utf-8")
 
             self.assertIn(destination_path, record_contents)
-            self.assertIn(build_wheel._hash_record_entry(build_wheel.PTH_BYTES), record_contents)
+            self.assertIn(build_wheel._hash_record_entry(build_wheel.PTH_BYTES), record_contents)  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":

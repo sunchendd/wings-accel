@@ -5,7 +5,7 @@ import json
 from unittest.mock import patch, MagicMock
 
 # Ensure the package is in python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch

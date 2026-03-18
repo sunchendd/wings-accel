@@ -12,7 +12,7 @@ import torch
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
 
-sys.path.insert(0, PACKAGE_ROOT)
+sys.path.append(PACKAGE_ROOT)
 
 _install_spec = importlib.util.spec_from_file_location(
     "wings_accel_install",
@@ -146,7 +146,7 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         self.assertIn("draft_length=2", output)
 
     def test_patch_gpu_model_runner_trims_padded_tail_on_cpu_export(self):
-        adaptive_draft_model_patch = _load_patch_module()
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
 
         class FakeGPUModelRunner:
             def __init__(self):
@@ -155,7 +155,8 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
                     draft_confidence_threshold=0.8,
                 )
 
-            def _update_states_after_model_execute(self, *args, **kwargs):
+            @staticmethod
+def _update_states_after_model_execute(*args, **kwargs):
                 return None
 
             @staticmethod
@@ -172,7 +173,7 @@ def _get_draft_token_ids_cpu():
 
         fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
 
-        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
 
         runner = fake_module.GPUModelRunner()
         draft_token_ids, req_ids = runner._get_draft_token_ids_cpu()  # pylint: disable=protected-access

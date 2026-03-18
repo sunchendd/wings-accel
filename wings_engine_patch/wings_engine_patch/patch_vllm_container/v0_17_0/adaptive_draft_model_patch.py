@@ -894,7 +894,7 @@ def _patch_spec_decode_eagle_module(module) -> None:
             )
         )
 
-        _require_runner(self)
+        _ = _require_runner(self)
         per_layer_attn_metadata, attn_metadata = _build_per_layer_attn_metadata(
             self,
             common_attn_metadata,
@@ -979,7 +979,7 @@ def _patch_spec_decode_eagle_module(module) -> None:
             confidence_threshold=confidence_threshold,
         )
 
-    patched_propose._wings_adaptive_draft_patched = True
+    patched_propose._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
     module.SpecDecodeBaseProposer.propose = patched_propose
 
 
