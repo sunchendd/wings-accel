@@ -189,6 +189,49 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
             ],
         )
 
+    def test_patch_gpu_model_runner_preserves_uniform_decode_query_len_for_cudagraph(
+        self,
+    ):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeCudagraphMode:
+            NONE = "none"
+
+            def __init__(self, value):
+                self._value = value
+
+            def decode_mode(self):
+                return self._value
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.num_spec_tokens = 4
+                self.compilation_config = types.SimpleNamespace(
+                    cudagraph_mode=FakeCudagraphMode("full")
+                )
+                self.speculative_config = types.SimpleNamespace(
+                    method="draft_model",
+                    num_speculative_tokens=4,
+                    speculative_token_range=[1, 2, 4],
+                )
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+
+        self.assertEqual(runner.draft_length, 4)
+        self.assertEqual(runner.uniform_decode_query_len, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -217,6 +217,30 @@ def _call_original_class_method(raw_method, original_method, instance, *args, **
     return original_method(instance, *args, **kwargs)
 
 
+def _should_preserve_uniform_decode_query_len(instance) -> bool:
+    compilation_config = getattr(instance, "compilation_config", None)
+    cudagraph_mode = getattr(compilation_config, "cudagraph_mode", None)
+    if cudagraph_mode is None:
+        return False
+
+    decode_mode = getattr(cudagraph_mode, "decode_mode", None)
+    if not callable(decode_mode):
+        return False
+
+    decoded_mode = decode_mode()
+    none_mode = getattr(type(cudagraph_mode), "NONE", None)
+    return decoded_mode != none_mode
+
+
+def _resolve_uniform_decode_query_len(instance, spec_config) -> int:
+    num_spec_tokens = getattr(instance, "num_spec_tokens", None)
+    if num_spec_tokens is None:
+        num_spec_tokens = getattr(spec_config, "num_speculative_tokens", 0) or 0
+    if _should_preserve_uniform_decode_query_len(instance):
+        return 1 + num_spec_tokens
+    return 1
+
+
 @dataclass
 class ProposeInputs:
     target_token_ids: object
@@ -773,7 +797,10 @@ def _patch_gpu_model_runner_module(module) -> None:
                         initial_length=spec_config.num_speculative_tokens,
                     )
                     self.draft_length = self.draft_length_controller.current_length
-                    self.uniform_decode_query_len = 1
+                    self.uniform_decode_query_len = _resolve_uniform_decode_query_len(
+                        self,
+                        spec_config,
+                    )
 
             patched_init._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
             runner_cls.__init__ = patched_init
