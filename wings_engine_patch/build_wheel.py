@@ -9,7 +9,7 @@ import sys
 import zipfile
 
 
-DEFAULT_VERSION = "1.0.0"
+DEFAULT_VERSION: str = "1.0.0"
 PACKAGE_NAME = "wings_engine_patch"
 PTH_FILENAME = "wings_engine_patch.pth"
 PTH_BYTES = b"import wings_engine_patch._auto_patch\n"
@@ -57,7 +57,7 @@ def _read_version_with_plaintext(pyproject_path: str) -> str:
     with open(pyproject_path, encoding="utf-8") as pyproject_file:
         for line in pyproject_file:
             version = _extract_version_from_line(line)
-            if version:
+            if version is not None:
                 return version
     return DEFAULT_VERSION
 
