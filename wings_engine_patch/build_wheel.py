@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from typing import Optional
 
 
 DEFAULT_VERSION: str = "1.0.0"
@@ -45,7 +46,7 @@ def _read_version_with_tomllib(pyproject_path: str, tomllib_module) -> str:
     return pyproject.get("project", {}).get("version", DEFAULT_VERSION)
 
 
-def _extract_version_from_line(line: str) -> str | None:
+def _extract_version_from_line(line: str) -> Optional[str]:
     stripped_line = line.strip()
     if not (stripped_line.startswith("version") and "=" in stripped_line):
         return None
