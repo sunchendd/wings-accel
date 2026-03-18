@@ -31,7 +31,7 @@ class TestBuildWheelHelpers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             wheel_path = os.path.join(tmpdir, "wings_engine_patch-1.0.0-py3-none-any.whl")
             record_name = "wings_engine_patch-1.0.0.dist-info/RECORD"
-            destination_path = build_wheel._build_destination_path("1.0.0")
+            destination_path = build_wheel._build_destination_path("1.0.0")  # pylint: disable=protected-access
 
             with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_DEFLATED) as wheel:
                 wheel.writestr("wings_engine_patch/__init__.py", "__version__ = '1.0.0'\n")

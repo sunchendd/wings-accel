@@ -17,8 +17,8 @@ from unittest.mock import patch
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
 
-sys.path.insert(0, PACKAGE_ROOT)
-sys.path.insert(0, PROJECT_ROOT)
+sys.path.append(PACKAGE_ROOT)
+sys.path.append(PROJECT_ROOT)
 
 import install as install_module
 from install import (
@@ -274,14 +274,14 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):  # pylint: disable=p
     """
 
     def test_shared_patch_triggers_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
+        result = registry_v1._expand_features_by_shared_patches(  # pylint: disable=protected-access
             self._ver_specs_with_shared_patch(), ["feature_x"]
         )
         self.assertIn("feature_x", result)
         self.assertIn("feature_y", result)
 
     def test_no_shared_patch_no_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
+        result = registry_v1._expand_features_by_shared_patches(  # pylint: disable=protected-access
             self._ver_specs_no_shared(), ["feature_x"]
         )
         self.assertEqual(result, {"feature_x"})
