@@ -59,10 +59,12 @@ class AdaptiveDraftLengthController:
 
 
 class _StderrProxy:
-    def write(self, message: str) -> int:
+    @staticmethod
+    def write(message: str) -> int:
         return sys.stderr.write(message)
 
-    def flush(self) -> None:
+    @staticmethod
+    def flush() -> None:
         sys.stderr.flush()
 
 
