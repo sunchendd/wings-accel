@@ -45,14 +45,20 @@ def _read_version_with_tomllib(pyproject_path: str, tomllib_module) -> str:
     return pyproject.get("project", {}).get("version", DEFAULT_VERSION)
 
 
+def _extract_version_from_line(line: str) -> str | None:
+    stripped_line = line.strip()
+    if not (stripped_line.startswith("version") and "=" in stripped_line):
+        return None
+    candidate = stripped_line.split("=", 1)[1].strip().strip('"').strip("'")
+    return candidate if candidate else None
+
+
 def _read_version_with_plaintext(pyproject_path: str) -> str:
     with open(pyproject_path, encoding="utf-8") as pyproject_file:
         for line in pyproject_file:
-            stripped_line = line.strip()
-            if stripped_line.startswith("version") and "=" in stripped_line:
-                candidate = stripped_line.split("=", 1)[1].strip().strip('"').strip("'")
-                if candidate:
-                    return candidate
+            version = _extract_version_from_line(line)
+            if version:
+                return version
     return DEFAULT_VERSION
 
 
