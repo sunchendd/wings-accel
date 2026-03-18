@@ -61,7 +61,7 @@ class AdaptiveDraftLengthController:
 class _StderrProxy:
     @staticmethod
     def write(message: str) -> int:
-        return sys.stderr.write(message)
+        return sys.stderr.write(message)  # pylint: disable=logging-not-lazy
 
     @staticmethod
     def flush() -> None:
