@@ -174,7 +174,7 @@ class TestAdaptiveDraftModelPatch(unittest.TestCase):
             adaptive_draft_model_patch.patch_vllm_adaptive_draft_model()
 
         self.assertIn(
-            "[Vllm Patch] adaptive_draft_model patch enabled",
+            "[wins-accel] adaptive_draft_model patch enabled",
             buf.getvalue(),
         )
 
@@ -185,20 +185,12 @@ class TestAdaptiveDraftModelPatch(unittest.TestCase):
 
         controller = AdaptiveDraftLengthController([1, 2, 4], initial_length=2)
 
-        self.assertEqual(
-            controller.observe_iteration(
-                num_draft_tokens=8,
-                num_accepted_tokens=8,
-            ),
-            4,
-        )
-        self.assertEqual(
-            controller.observe_iteration(
-                num_draft_tokens=8,
-                num_accepted_tokens=0,
-            ),
-            2,
-        )
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 2)
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 2)
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 4)
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 4)
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 4)
+        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 2)
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +207,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
     """
 
     ADAPTIVE_DRAFT_OPTIONS = '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
-    ADAPTIVE_DRAFT_LOG = '[Vllm Patch] adaptive_draft_model patch enabled'
+    ADAPTIVE_DRAFT_LOG = '[wins-accel] adaptive_draft_model patch enabled'
     ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'

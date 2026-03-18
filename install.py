@@ -29,19 +29,32 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-stderr_logger = logging.getLogger('stderr')
-stderr_handler = logging.StreamHandler(sys.stderr)
-stderr_handler.setLevel(logging.INFO)
-stderr_logger.addHandler(stderr_handler)
+
+class _StreamProxy:
+    def __init__(self, stream_name: str):
+        self._stream_name = stream_name
+
+    def write(self, message: str) -> int:
+        return getattr(sys, self._stream_name).write(message)
+
+    def flush(self) -> None:
+        getattr(sys, self._stream_name).flush()
+
+
+def _build_logger(name: str, stream_name: str) -> logging.Logger:
+    configured_logger = logging.getLogger(name)
+    if configured_logger.handlers:
+        return configured_logger
+    handler = logging.StreamHandler(_StreamProxy(stream_name))
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    configured_logger.addHandler(handler)
+    configured_logger.setLevel(logging.INFO)
+    configured_logger.propagate = False
+    return configured_logger
+
+
+logger = _build_logger(__name__, "stdout")
+stderr_logger = _build_logger("stderr", "stderr")
 
 # Root-level supported_features.json is the CLI/MaaS-facing source of truth.
 _BASE_DIR = Path(__file__).resolve().parent

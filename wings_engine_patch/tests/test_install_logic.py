@@ -14,7 +14,11 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
+
+sys.path.insert(0, PACKAGE_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
 import install as install_module
 from install import (

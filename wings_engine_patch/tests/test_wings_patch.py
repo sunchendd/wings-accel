@@ -5,9 +5,8 @@ import json
 from unittest.mock import patch, MagicMock
 
 # Ensure the package is in python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from wings_engine_patch.registry import enable
 import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch
 
@@ -48,14 +47,14 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
     def test_01_version_exact_match(self):
         """Test that a patch is applied when the version matches exactly."""
-        enable('test_engine', ['feature_match'], version='1.0.0')
+        registry_v1.enable('test_engine', ['feature_match'], version='1.0.0')
         self.assertTrue(dummy_patch.PATCH_APPLIED, "Should apply patch for matching version")
 
     def test_02_version_mismatch_fallback_fails(self):
         """Test that NO patch is applied when the version mismatches AND the feature is not in the default version."""
         # 'feature_match' is only in 1.0.0. Default is 2.0.0. 
         # Requesting 1.0.1 (unknown) should fallback to 2.0.0, but feature is not there.
-        enable('test_engine', ['feature_match'], version='1.0.1')
+        registry_v1.enable('test_engine', ['feature_match'], version='1.0.1')
         self.assertFalse(dummy_patch.PATCH_APPLIED, "Should not apply patch because feature is missing in default version")
 
     def test_03_version_mismatch_auth_fallback_success(self):
@@ -68,20 +67,20 @@ class TestWingsPatchMechanism(unittest.TestCase):
         # If ver_specs IS found, usage that one.
         
         # To test fallback, we need a version that DOES NOT EXIST.
-        enable('test_engine', ['feature_w_default'], version='9.9.9')
+        registry_v1.enable('test_engine', ['feature_w_default'], version='9.9.9')
         self.assertTrue(dummy_patch.PATCH_APPLIED, "Should automatically fallback to default version for unknown version")
 
     def test_06_unknown_feature_warns_only(self):
         """Test that enabling an unknown feature acts gracefully (prints warning)."""
         # This basically ensures no exception is raised
         try:
-            enable('test_engine', ['unknown_feature'], version='1.0.0')
+            registry_v1.enable('test_engine', ['unknown_feature'], version='1.0.0')
         except Exception as e:
             self.fail(f"enable() raised Exception for unknown feature: {e}")
 
     def test_enable_returns_empty_failures_on_success(self):
         """enable() returns an empty list when all patches apply without error."""
-        failures = enable('test_engine', ['feature_match'], version='1.0.0')
+        failures = registry_v1.enable('test_engine', ['feature_match'], version='1.0.0')
         self.assertEqual(failures, [], "No failures expected for a successful patch run")
 
     def test_enable_returns_failures_on_patch_exception(self):
@@ -94,7 +93,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
         # pylint: disable=protected-access
         registry_v1._registered_patches['test_engine']['1.0.0']['features']['bad_feat'] = [bad_patch]
-        failures = enable('test_engine', ['bad_feat'], version='1.0.0')
+        failures = registry_v1.enable('test_engine', ['bad_feat'], version='1.0.0')
         self.assertEqual(len(failures), 1)
         name, exc = failures[0]
         self.assertIn('bad_patch', name)
@@ -102,7 +101,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
     def test_enable_unknown_engine_returns_empty(self):
         """enable() returns empty list and warns for an unregistered engine."""
-        failures = enable('nonexistent_engine', ['feat'], version='1.0.0')
+        failures = registry_v1.enable('nonexistent_engine', ['feat'], version='1.0.0')
         self.assertEqual(failures, [])
 
 
@@ -112,7 +111,7 @@ class TestAutoPatchModule(unittest.TestCase):
     ADAPTIVE_DRAFT_OPTIONS = json.dumps(
         {'vllm': {'version': '0.17.0', 'features': ['adaptive_draft_model']}}
     )
-    ADAPTIVE_DRAFT_LOG = '[Vllm Patch] adaptive_draft_model patch enabled'
+    ADAPTIVE_DRAFT_LOG = '[wins-accel] adaptive_draft_model patch enabled'
     ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
