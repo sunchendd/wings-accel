@@ -211,6 +211,12 @@ def _clear_attribute(target, attribute_name: str) -> None:
     setattr(target, attribute_name, None)
 
 
+def _call_original_class_method(raw_method, original_method, instance, *args, **kwargs):
+    if isinstance(raw_method, staticmethod):
+        return original_method(*args, **kwargs)
+    return original_method(instance, *args, **kwargs)
+
+
 @dataclass
 class ProposeInputs:
     target_token_ids: object
@@ -819,12 +825,22 @@ def _patch_gpu_model_runner_module(module) -> None:
         patched_update_states_after_model_execute,
     )
 
+    raw_get_draft_token_ids_cpu = inspect.getattr_static(
+        runner_cls,
+        "_get_draft_token_ids_cpu",
+    )
     original_get_draft_token_ids_cpu = getattr(runner_cls, "_get_draft_token_ids_cpu")
     if getattr(original_get_draft_token_ids_cpu, "_wings_adaptive_draft_patched", False):
         return
 
     def patched_get_draft_token_ids_cpu(self, *args, **kwargs):
-        draft_token_ids, req_ids = original_get_draft_token_ids_cpu(self, *args, **kwargs)
+        draft_token_ids, req_ids = _call_original_class_method(
+            raw_get_draft_token_ids_cpu,
+            original_get_draft_token_ids_cpu,
+            self,
+            *args,
+            **kwargs,
+        )
         spec_config = getattr(self, "speculative_config", None)
         confidence_threshold = getattr(spec_config, "draft_confidence_threshold", 0.0)
         if (
