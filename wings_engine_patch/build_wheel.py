@@ -123,6 +123,14 @@ def _build_record_contents(
     )
 
 
+def _copy_wheel_items_excluding_record(source_wheel: zipfile.ZipFile, dest_wheel: zipfile.ZipFile, record_name: str) -> None:
+    dest_wheel.comment = source_wheel.comment
+    for item in source_wheel.infolist():
+        if item.filename == record_name:
+            continue
+        dest_wheel.writestr(item, source_wheel.read(item.filename))
+
+
 def _repack_wheel_with_pth(whl_path: str, destination_path: str) -> None:
     new_whl_path = whl_path.replace(".whl", "_repacked.whl")
     with zipfile.ZipFile(whl_path, "r") as source_wheel:
@@ -135,12 +143,7 @@ def _repack_wheel_with_pth(whl_path: str, destination_path: str) -> None:
             "w",
             compression=zipfile.ZIP_DEFLATED,
         ) as repacked_wheel:
-            repacked_wheel.comment = source_wheel.comment
-            for item in source_wheel.infolist():
-                if item.filename == record_name:
-                    continue
-                repacked_wheel.writestr(item, source_wheel.read(item.filename))
-
+            _copy_wheel_items_excluding_record(source_wheel, repacked_wheel, record_name)
             repacked_wheel.writestr(destination_path, PTH_BYTES)
             repacked_wheel.writestr(
                 record_name,
