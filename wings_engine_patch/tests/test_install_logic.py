@@ -287,19 +287,19 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):  # pylint: disable=p
         self.assertEqual(result, {"feature_x"})
 
     def test_non_propagating_patch_blocks_expansion(self):
-        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
+        result = registry_v1._expand_features_by_shared_patches(  # pylint: disable=protected-access
             self._ver_specs_non_propagating(), ["feature_x"]
         )
         self.assertEqual(result, {"feature_x"})
 
     def test_empty_selection_returns_empty(self):
-        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
+        result = registry_v1._expand_features_by_shared_patches(  # pylint: disable=protected-access
             self._ver_specs_with_shared_patch(), []
         )
         self.assertEqual(result, set())
 
     def test_selecting_both_features_stays_same(self):
-        result = registry_v1._expand_features_by_shared_patches(  # Private method for testing
+        result = registry_v1._expand_features_by_shared_patches(  # pylint: disable=protected-access
             self._ver_specs_with_shared_patch(), ["feature_x", "feature_y"]
         )
         self.assertEqual(result, {"feature_x", "feature_y"})

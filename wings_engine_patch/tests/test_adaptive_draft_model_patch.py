@@ -157,9 +157,9 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
 
             @staticmethod
 def _update_states_after_model_execute(*args, **kwargs):
-                return None
+    return None
 
-            @staticmethod
+@staticmethod
 def _get_draft_token_ids_cpu():
                 return (
                     [
