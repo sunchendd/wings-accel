@@ -7,15 +7,8 @@ from unittest.mock import patch, MagicMock
 
 # Ensure the package source is on sys.path.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-sys.modules.pop('wings_engine_patch._auto_patch', None)
-sys.modules.pop('wings_engine_patch.registry_v1', None)
-sys.modules.pop('wings_engine_patch', None)
-
-# pylint: disable=wrong-import-position
-# Delayed import: must clear modules before importing
 import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch
-# pylint: enable=wrong-import-position
 
 
 class TestWingsPatchMechanism(unittest.TestCase):
