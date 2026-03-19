@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format='[TEST] %(message)s')
 logger = logging.getLogger(__name__)
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-sys.path.insert(0, PACKAGE_ROOT)
+sys.path.append(PACKAGE_ROOT)
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,12 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         code = "print('should_not_reach')"
         rc, stdout, stderr = _run_python(
             code,
-            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": '{"vllm": {"version": "0.12.0", "features": ["adaptive_draft_model"]}}'},
+            env_extra={
+                "WINGS_ENGINE_PATCH_OPTIONS": (
+                    '{"vllm": {"version": "0.12.0", '
+                    '"features": ["adaptive_draft_model"]}}'
+                )
+            },
         )
         self.assertNotEqual(rc, 0, "Historical unsupported versions should fail the process")
         self.assertNotIn("should_not_reach", stdout)
@@ -281,7 +286,12 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         code = "print('startup_probe')"
         rc, stdout, stderr = _run_python(
             code,
-            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": '{"vllm": {"version": "0.18.0", "features": ["adaptive_draft_model"]}}'},
+            env_extra={
+                "WINGS_ENGINE_PATCH_OPTIONS": (
+                    '{"vllm": {"version": "0.18.0", '
+                    '"features": ["adaptive_draft_model"]}}'
+                )
+            },
         )
         self.assertEqual(rc, 0, f"Future-version fallback should succeed. stdout={stdout!r} stderr={stderr!r}")
         self.assertIn("startup_probe", stdout)

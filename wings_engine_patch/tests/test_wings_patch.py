@@ -5,8 +5,8 @@ import json
 import io
 from unittest.mock import patch, MagicMock
 
-# Ensure the package source is first on sys.path.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Ensure the package source is on sys.path.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 sys.modules.pop('wings_engine_patch._auto_patch', None)
 sys.modules.pop('wings_engine_patch.registry_v1', None)
 sys.modules.pop('wings_engine_patch', None)
@@ -133,7 +133,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_no_env_var_is_silent(self):
         """No env var → no error, no output."""
-        import io
         buf = io.StringIO()
         with patch('sys.stderr', buf):
             self._run_auto_patch(None)
@@ -141,7 +140,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_malformed_json_warns(self):
         """Malformed JSON → Warning on stderr, no crash."""
-        import io
         buf = io.StringIO()
         with patch('sys.stderr', buf):
             self._run_auto_patch('{not valid json}')
@@ -149,7 +147,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_missing_version_warns(self):
         """Config with no 'version' key → Warning, patch not applied."""
-        import io
         buf = io.StringIO()
         opts = json.dumps({'vllm': {'features': ['adaptive_draft_model']}})
         with patch('sys.stderr', buf):
@@ -158,7 +155,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_unknown_engine_warns(self):
         """Unknown engine → Warning on stderr."""
-        import io
         buf = io.StringIO()
         opts = json.dumps({'totally_unknown_engine': {'version': '1.0', 'features': ['x']}})
         with patch('sys.stderr', buf):
@@ -167,7 +163,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_top_level_non_dict_warns(self):
         """Non-dict JSON top level → Warning on stderr."""
-        import io
         buf = io.StringIO()
         with patch('sys.stderr', buf):
             self._run_auto_patch('["not", "a", "dict"]')
@@ -175,7 +170,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_patch_failure_logged(self):
         """Patch that raises → failure is logged to stderr by _auto_patch."""
-        import io
         import importlib
         import wings_engine_patch._auto_patch as ap_mod
         import wings_engine_patch.registry_v1 as rv1
@@ -243,8 +237,6 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_adaptive_draft_feature_logs(self):
         """adaptive_draft_model should emit its startup log when auto-patch enables it."""
-        import io
-
         buf = io.StringIO()
         with patch('sys.stderr', buf):
             self._run_auto_patch(self.ADAPTIVE_DRAFT_OPTIONS)

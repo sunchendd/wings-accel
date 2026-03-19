@@ -40,4 +40,4 @@ try:
 except Exception:
     print("[Wings Engine Patch] Critical Error during auto-patching:", file=sys.stderr)
     traceback.print_exc(file=sys.stderr)
-    raise SystemExit(1)
+raise SystemExit(1) from None
