@@ -11,8 +11,11 @@ sys.modules.pop('wings_engine_patch._auto_patch', None)
 sys.modules.pop('wings_engine_patch.registry_v1', None)
 sys.modules.pop('wings_engine_patch', None)
 
+# pylint: disable=wrong-import-position
+# Delayed import: must clear modules before importing
 import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch
+# pylint: enable=wrong-import-position
 
 
 class TestWingsPatchMechanism(unittest.TestCase):
@@ -108,9 +111,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
         bad_patch.__module__ = 'test_module'
         bad_patch.__name__ = 'bad_patch'
 
+        # pylint: disable=protected-access
         registry_v1._registered_patches['test_engine']['2.0.0']['features']['future_bad_feat'] = [bad_patch]
         with self.assertRaises(registry_v1.ForwardCompatibilityPatchError) as ctx:
             registry_v1.enable('test_engine', ['future_bad_feat'], version='9.9.9')
+        # pylint: enable=protected-access
         self.assertIn("Tried default patch set '2.0.0'", str(ctx.exception))
         self.assertIn('bad_patch', str(ctx.exception))
 
@@ -205,8 +210,10 @@ class TestAutoPatchModule(unittest.TestCase):
 
         opts = json.dumps({'vllm': {'version': '0.12.0', 'features': ['adaptive_draft_model']}})
         with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}, clear=False):
+            # pylint: disable=avoid-using-exit
             with self.assertRaises(SystemExit):
                 importlib.reload(ap_mod)
+            # pylint: enable=avoid-using-exit
 
     def test_auto_patch_future_version_patch_failure_raises(self):
         import importlib
@@ -219,6 +226,7 @@ class TestAutoPatchModule(unittest.TestCase):
         exploding_patch.__module__ = 'test_mod'
         exploding_patch.__name__ = 'exploding_forward_patch'
 
+        # pylint: disable=protected-access,avoid-using-exit
         orig = rv1._registered_patches.copy()
         rv1._registered_patches['future_test_engine'] = {
             '1.0': {
@@ -234,6 +242,7 @@ class TestAutoPatchModule(unittest.TestCase):
                     importlib.reload(ap_mod)
         finally:
             rv1._registered_patches = orig
+        # pylint: enable=protected-access,avoid-using-exit
 
     def test_auto_patch_adaptive_draft_feature_logs(self):
         """adaptive_draft_model should emit its startup log when auto-patch enables it."""
