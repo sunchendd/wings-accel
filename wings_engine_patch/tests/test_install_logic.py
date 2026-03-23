@@ -11,6 +11,7 @@ import unittest
 import io
 import tempfile
 import logging
+import builtins
 from pathlib import Path
 from unittest.mock import patch
 
@@ -223,6 +224,21 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(set(features.keys()), {"adaptive_draft_model"})
 
 
+class TestCurrentVllmVersionPolicy(unittest.TestCase):
+
+    def test_manifest_future_patch_release_falls_back_to_0170(self):
+        data = load_supported_features()
+        ver, spec = resolve_version("vllm", "0.17.1", data["engines"]["vllm"])
+        self.assertEqual(ver, "0.17.0")
+        self.assertTrue(spec["is_default"])
+
+    def test_manifest_future_minor_release_falls_back_to_0170(self):
+        data = load_supported_features()
+        ver, spec = resolve_version("vllm", "0.18.0", data["engines"]["vllm"])
+        self.assertEqual(ver, "0.17.0")
+        self.assertTrue(spec["is_default"])
+
+
 class TestFindLocalWheel(unittest.TestCase):
 
     def test_find_local_whl_reads_root_build_output(self):
@@ -266,6 +282,31 @@ class TestInstallEngine(unittest.TestCase):
         output = captured.getvalue()
         self.assertIn("--no-deps", output)
         self.assertIn(str(wheel_path), output)
+
+
+class TestLocalRuntimeDeps(unittest.TestCase):
+
+    def test_has_local_runtime_deps_requires_packaging(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "packaging":
+                raise ImportError("packaging unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(install_module._has_local_runtime_deps())  # pylint: disable=protected-access
+
+    def test_has_local_runtime_deps_requires_wrapt(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "wrapt":
+                raise ImportError("wrapt unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(install_module._has_local_runtime_deps())  # pylint: disable=protected-access
 
 
 

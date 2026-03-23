@@ -3,6 +3,7 @@ import sys
 import os
 import json
 import io
+import types
 from unittest.mock import patch, MagicMock
 
 # Ensure the package source is on sys.path.
@@ -240,8 +241,10 @@ class TestAutoPatchModule(unittest.TestCase):
     def test_auto_patch_adaptive_draft_feature_logs(self):
         """adaptive_draft_model should emit its startup log when auto-patch enables it."""
         buf = io.StringIO()
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
         with patch('sys.stderr', buf):
-            self._run_auto_patch(self.ADAPTIVE_DRAFT_OPTIONS)
+            with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                self._run_auto_patch(self.ADAPTIVE_DRAFT_OPTIONS)
 
         stderr = buf.getvalue()
         self.assertNotIn(
@@ -264,6 +267,21 @@ class TestAutoPatchModule(unittest.TestCase):
             stderr,
             'Expected adaptive_draft_model startup log when auto-patching vllm',
         )
+
+    def test_auto_patch_future_patch_release_warns_and_falls_back(self):
+        buf = io.StringIO()
+        future_patch_options = json.dumps(
+            {'vllm': {'version': '0.17.1', 'features': ['adaptive_draft_model']}}
+        )
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        with patch('sys.stderr', buf):
+            with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                self._run_auto_patch(future_patch_options)
+
+        stderr = buf.getvalue()
+        self.assertIn("newer than highest validated version '0.17.0'", stderr)
+        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
 
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""

@@ -15,7 +15,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Intended Audience :: Developers",
 ]
-dependencies = ["wrapt"]
+dependencies = ["wrapt", "packaging"]
 
 [project.optional-dependencies]
 # vllm (x86/GPU) — currently pure Python patch, reserved for future engine-specific deps

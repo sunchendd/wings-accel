@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from unittest.mock import patch
@@ -13,6 +14,15 @@ import build_wheel
 
 
 class TestBuildWheelHelpers(unittest.TestCase):
+    def test_pyproject_declares_runtime_dependencies_needed_at_startup(self):
+        pyproject_path = os.path.join(PACKAGE_ROOT, "pyproject.toml")
+        with open(pyproject_path, "rb") as pyproject_file:
+            pyproject = tomllib.load(pyproject_file)
+
+        dependencies = set(pyproject["project"]["dependencies"])
+        self.assertIn("wrapt", dependencies)
+        self.assertIn("packaging", dependencies)
+
     def test_get_version_from_pyproject_uses_plaintext_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             pyproject_path = os.path.join(tmpdir, "pyproject.toml")

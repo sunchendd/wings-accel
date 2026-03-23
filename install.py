@@ -237,6 +237,7 @@ def _find_local_whl() -> Path | None:
 def _has_local_runtime_deps() -> bool:
     try:
         import wrapt  # noqa: F401
+        import packaging  # noqa: F401
     except ImportError:
         return False
     return True
