@@ -4,12 +4,17 @@ import logging
 import sys
 from dataclasses import dataclass
 
+import torch
+
 
 @dataclass(frozen=True)
 class ResolvedSpeculativeTokenSettings:
     num_speculative_tokens: int | None
     speculative_token_range: list[int] | None
     draft_confidence_threshold: float
+
+
+_ADAPTIVE_DRAFT_SUPPORTED_METHODS = {"draft_model", "eagle3"}
 
 
 class AdaptiveDraftLengthController:
@@ -88,6 +93,10 @@ def _is_strictly_increasing(values: list[int]) -> bool:
     return True
 
 
+def _supports_adaptive_draft_length(method: str | None) -> bool:
+    return method in _ADAPTIVE_DRAFT_SUPPORTED_METHODS
+
+
 _configure_logger()
 
 
@@ -108,6 +117,14 @@ def resolve_speculative_token_settings(
         draft_confidence_threshold = 0.0
     if not 0.0 <= float(draft_confidence_threshold) <= 1.0:
         raise ValueError("draft_confidence_threshold must be between 0.0 and 1.0.")
+    if (
+        float(draft_confidence_threshold) > 0.0
+        and method is not None
+        and method != "draft_model"
+    ):
+        raise ValueError(
+            "draft_confidence_threshold is only supported for draft_model."
+        )
 
     if speculative_token_range is None:
         return ResolvedSpeculativeTokenSettings(
@@ -118,11 +135,15 @@ def resolve_speculative_token_settings(
 
     if method is None:
         method = "draft_model"
-    if method != "draft_model":
-        raise ValueError("speculative_token_range is only supported for draft_model.")
+    if not _supports_adaptive_draft_length(method):
+        supported_methods = ", ".join(sorted(_ADAPTIVE_DRAFT_SUPPORTED_METHODS))
+        raise ValueError(
+            "speculative_token_range is only supported for "
+            f"{supported_methods}."
+        )
     if num_speculative_tokens is None:
         raise ValueError(
-            "draft_model requires num_speculative_tokens when "
+            f"{method} requires num_speculative_tokens when "
             "speculative_token_range is provided."
         )
     if not speculative_token_range:
@@ -138,6 +159,11 @@ def resolve_speculative_token_settings(
     if not _is_strictly_increasing(speculative_token_range):
         raise ValueError(
             "speculative_token_range must be strictly increasing as supplied."
+        )
+    if speculative_token_range[-1] > num_speculative_tokens:
+        raise ValueError(
+            "speculative_token_range must not contain values greater than "
+            "num_speculative_tokens."
         )
     if num_speculative_tokens not in speculative_token_range:
         raise ValueError(
@@ -197,6 +223,20 @@ def trim_trailing_invalid_draft_tokens(
     return trimmed_rows
 
 
+def _resolve_num_draft_tokens_for_controller(
+    instance,
+    valid_sampled_token_count: list[int],
+) -> int:
+    get_draft_token_ids_cpu = getattr(instance, "_get_draft_token_ids_cpu", None)
+    if callable(get_draft_token_ids_cpu):
+        draft_token_ids, _ = get_draft_token_ids_cpu()
+        if draft_token_ids:
+            return sum(
+                sum(1 for token_id in row if token_id >= 0) for row in draft_token_ids
+            )
+    return (getattr(instance, "draft_length", 0) or 0) * len(valid_sampled_token_count)
+
+
 def _call_member(target, member_name: str, *args, **kwargs):
     return getattr(target, member_name)(*args, **kwargs)
 
@@ -215,6 +255,17 @@ def _call_original_class_method(raw_method, original_method, instance, *args, **
     if isinstance(raw_method, staticmethod):
         return original_method(*args, **kwargs)
     return original_method(instance, *args, **kwargs)
+
+
+def _call_with_optional_draft_length(propose_method, *, draft_length: int | None, **kwargs):
+    signature = inspect.signature(propose_method)
+    supports_draft_length = "draft_length" in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+    if supports_draft_length and draft_length is not None:
+        kwargs["draft_length"] = draft_length
+    return propose_method(**kwargs)
 
 
 def _should_preserve_uniform_decode_query_len(instance) -> bool:
@@ -272,7 +323,12 @@ class DraftIterationState:
 
 
 def _bind_propose_inputs(original_propose, instance, args, kwargs) -> ProposeInputs:
-    bound_arguments = inspect.signature(original_propose).bind(instance, *args, **kwargs)
+    signature = inspect.signature(original_propose)
+    bind_kwargs = dict(kwargs)
+    explicit_draft_length = bind_kwargs.get("draft_length")
+    if "draft_length" not in signature.parameters:
+        bind_kwargs.pop("draft_length", None)
+    bound_arguments = signature.bind(instance, *args, **bind_kwargs)
     bound_arguments.apply_defaults()
     arguments = bound_arguments.arguments
     return ProposeInputs(
@@ -286,7 +342,7 @@ def _bind_propose_inputs(original_propose, instance, args, kwargs) -> ProposeInp
         mm_embed_inputs=arguments.get("mm_embed_inputs"),
         num_rejected_tokens_gpu=arguments.get("num_rejected_tokens_gpu"),
         slot_mappings=arguments.get("slot_mappings"),
-        draft_length=arguments.get("draft_length"),
+        draft_length=arguments.get("draft_length", explicit_draft_length),
     )
 
 
@@ -304,17 +360,25 @@ def _call_original_propose(
     }
     if supports_draft_length:
         kwargs["draft_length"] = inputs.draft_length
-    return original_propose(
-        instance,
-        inputs.target_token_ids,
-        inputs.target_positions,
-        inputs.target_hidden_states,
-        inputs.next_token_ids,
-        inputs.token_indices_to_sample,
-        inputs.common_attn_metadata,
-        inputs.sampling_metadata,
-        **kwargs,
-    )
+    original_num_speculative_tokens = None
+    if not supports_draft_length and inputs.draft_length is not None:
+        original_num_speculative_tokens = getattr(instance, "num_speculative_tokens", None)
+        instance.num_speculative_tokens = inputs.draft_length
+    try:
+        return original_propose(
+            instance,
+            inputs.target_token_ids,
+            inputs.target_positions,
+            inputs.target_hidden_states,
+            inputs.next_token_ids,
+            inputs.token_indices_to_sample,
+            inputs.common_attn_metadata,
+            inputs.sampling_metadata,
+            **kwargs,
+        )
+    finally:
+        if original_num_speculative_tokens is not None:
+            instance.num_speculative_tokens = original_num_speculative_tokens
 
 
 def _should_use_confidence_filter(instance, confidence_threshold: float) -> bool:
@@ -323,6 +387,23 @@ def _should_use_confidence_filter(instance, confidence_threshold: float) -> bool
         and confidence_threshold > 0.0
         and not getattr(instance, "parallel_drafting", False)
         and not getattr(instance, "use_local_argmax_reduction", False)
+    )
+
+
+def _should_use_padded_adaptive_draft(
+    instance,
+    *,
+    draft_length: int | None,
+    confidence_threshold: float,
+) -> bool:
+    if draft_length is None:
+        return False
+    return (
+        _supports_adaptive_draft_length(getattr(instance, "method", None))
+        and draft_length < getattr(instance, "num_speculative_tokens", 0)
+        and not getattr(instance, "parallel_drafting", False)
+        and not getattr(instance, "use_local_argmax_reduction", False)
+        and confidence_threshold >= 0.0
     )
 
 
@@ -415,7 +496,8 @@ def _extract_sampling_inputs(
 
 
 def _resolve_pad_token_id(speculative_config) -> int:
-    hf_config = getattr(speculative_config.draft_model_config, "hf_config", None)
+    draft_model_config = getattr(speculative_config, "draft_model_config", None)
+    hf_config = getattr(draft_model_config, "hf_config", None)
     pad_token_id = getattr(hf_config, "pad_token_id", None)
     if pad_token_id is None:
         return 0
@@ -789,7 +871,9 @@ def _patch_gpu_model_runner_module(module) -> None:
                 token_range = getattr(spec_config, "speculative_token_range", None)
                 if (
                     spec_config is not None
-                    and getattr(spec_config, "method", None) == "draft_model"
+                    and _supports_adaptive_draft_length(
+                        getattr(spec_config, "method", None)
+                    )
                     and token_range is not None
                 ):
                     self.draft_length_controller = AdaptiveDraftLengthController(
@@ -827,10 +911,21 @@ def _patch_gpu_model_runner_module(module) -> None:
             )
             if valid_sampled_token_count:
                 previous_draft_length = self.draft_length
-                num_draft_tokens = self.draft_length * len(valid_sampled_token_count)
+                num_draft_tokens = _resolve_num_draft_tokens_for_controller(
+                    self,
+                    valid_sampled_token_count,
+                )
                 num_accepted_tokens = sum(
                     max(0, count - 1) for count in valid_sampled_token_count
                 )
+                if num_accepted_tokens > num_draft_tokens:
+                    log_runtime_state(
+                        "adaptive-draft-length-accounting-clamped",
+                        num_draft_tokens=num_draft_tokens,
+                        num_accepted_tokens=num_accepted_tokens,
+                        previous_draft_length=previous_draft_length,
+                    )
+                    num_accepted_tokens = num_draft_tokens
                 self.draft_length = controller.observe_iteration(
                     num_draft_tokens=num_draft_tokens,
                     num_accepted_tokens=num_accepted_tokens,
@@ -851,6 +946,149 @@ def _patch_gpu_model_runner_module(module) -> None:
         "_update_states_after_model_execute",
         patched_update_states_after_model_execute,
     )
+
+    original_propose_draft_token_ids = getattr(runner_cls, "propose_draft_token_ids", None)
+    if original_propose_draft_token_ids is not None and not getattr(
+        original_propose_draft_token_ids,
+        "_wings_adaptive_draft_patched",
+        False,
+    ):
+
+        def patched_propose_draft_token_ids(
+            self,
+            scheduler_output,
+            sampled_token_ids,
+            sampling_metadata,
+            hidden_states,
+            sample_hidden_states,
+            aux_hidden_states,
+            spec_decode_metadata,
+            common_attn_metadata,
+            slot_mappings,
+        ):
+            spec_config = getattr(self, "speculative_config", None)
+            if not (
+                spec_config is not None
+                and _supports_adaptive_draft_length(getattr(spec_config, "method", None))
+            ):
+                return original_propose_draft_token_ids(
+                    self,
+                    scheduler_output,
+                    sampled_token_ids,
+                    sampling_metadata,
+                    hidden_states,
+                    sample_hidden_states,
+                    aux_hidden_states,
+                    spec_decode_metadata,
+                    common_attn_metadata,
+                    slot_mappings,
+                )
+
+            num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
+            if spec_config.disable_padded_drafter_batch:
+                assert isinstance(sampled_token_ids, list), (
+                    "sampled_token_ids should be a python list when"
+                    "padded-batch is disabled."
+                )
+                next_token_ids = self.drafter.prepare_next_token_ids_cpu(
+                    sampled_token_ids,
+                    self.requests,
+                    self.input_batch,
+                    scheduler_output.num_scheduled_tokens,
+                )
+            else:
+                assert isinstance(sampled_token_ids, torch.Tensor), (
+                    "sampled_token_ids should be a torch.Tensor when"
+                    "padded-batch is enabled."
+                )
+                next_token_ids, valid_sampled_tokens_count = (
+                    self.drafter.prepare_next_token_ids_padded(
+                        common_attn_metadata,
+                        sampled_token_ids,
+                        self.requests,
+                        self.input_batch,
+                        self.discard_request_mask.gpu,
+                    )
+                )
+                self._copy_valid_sampled_token_count(
+                    next_token_ids, valid_sampled_tokens_count
+                )
+
+            num_rejected_tokens_gpu = None
+            if spec_decode_metadata is None:
+                token_indices_to_sample = None
+                target_token_ids = self.input_ids.gpu[:num_scheduled_tokens]
+                target_positions = self._get_positions(num_scheduled_tokens)
+                if self.use_aux_hidden_state_outputs:
+                    assert aux_hidden_states is not None
+                    target_hidden_states = torch.cat(
+                        [h[:num_scheduled_tokens] for h in aux_hidden_states], dim=-1
+                    )
+                else:
+                    target_hidden_states = hidden_states[:num_scheduled_tokens]
+            else:
+                if spec_config.disable_padded_drafter_batch:
+                    token_indices_to_sample = None
+                    common_attn_metadata, token_indices = self.drafter.prepare_inputs(
+                        common_attn_metadata,
+                        sampled_token_ids,
+                        spec_decode_metadata.num_draft_tokens,
+                    )
+                    target_token_ids = self.input_ids.gpu[token_indices]
+                    target_positions = self._get_positions(token_indices)
+                    if self.use_aux_hidden_state_outputs:
+                        assert aux_hidden_states is not None
+                        target_hidden_states = torch.cat(
+                            [h[token_indices] for h in aux_hidden_states], dim=-1
+                        )
+                    else:
+                        target_hidden_states = hidden_states[token_indices]
+                else:
+                    (
+                        common_attn_metadata,
+                        token_indices_to_sample,
+                        num_rejected_tokens_gpu,
+                    ) = self.drafter.prepare_inputs_padded(
+                        common_attn_metadata,
+                        spec_decode_metadata,
+                        valid_sampled_tokens_count,
+                    )
+                    total_num_tokens = common_attn_metadata.num_actual_tokens
+                    target_token_ids = self.input_ids.gpu[:total_num_tokens]
+                    target_positions = self._get_positions(total_num_tokens)
+                    if self.use_aux_hidden_state_outputs:
+                        assert aux_hidden_states is not None
+                        target_hidden_states = torch.cat(
+                            [h[:total_num_tokens] for h in aux_hidden_states], dim=-1
+                        )
+                    else:
+                        target_hidden_states = hidden_states[:total_num_tokens]
+
+            if self.supports_mm_inputs and self.drafter.supports_mm_inputs:
+                mm_embed_inputs = self._gather_mm_embeddings(
+                    scheduler_output,
+                    shift_computed_tokens=1,
+                )
+            else:
+                mm_embed_inputs = None
+
+            return _call_with_optional_draft_length(
+                self.drafter.propose,
+                draft_length=getattr(self, "draft_length", None),
+                target_token_ids=target_token_ids,
+                target_positions=target_positions,
+                target_hidden_states=target_hidden_states,
+                next_token_ids=next_token_ids,
+                token_indices_to_sample=token_indices_to_sample,
+                sampling_metadata=sampling_metadata,
+                common_attn_metadata=common_attn_metadata,
+                mm_embed_inputs=mm_embed_inputs,
+                num_rejected_tokens_gpu=num_rejected_tokens_gpu,
+                slot_mappings=slot_mappings,
+            )
+
+        patched_propose_draft_token_ids._wings_adaptive_draft_patched = True  # pylint: disable=protected-access
+        setattr(runner_cls, "propose_draft_token_ids", patched_propose_draft_token_ids)
 
     raw_get_draft_token_ids_cpu = inspect.getattr_static(
         runner_cls,
@@ -905,12 +1143,22 @@ def _patch_spec_decode_eagle_module(module) -> None:
         inputs = _bind_propose_inputs(original_propose, self, args, kwargs)
         if inputs.draft_length is None and getattr(self, "runner", None) is not None:
             inputs.draft_length = getattr(self.runner, "draft_length", None)
+        effective_draft_length = inputs.draft_length or self.num_speculative_tokens
         confidence_threshold = getattr(
             getattr(self, "speculative_config", None),
             "draft_confidence_threshold",
             0.0,
         )
-        if not _should_use_confidence_filter(self, confidence_threshold):
+        use_confidence_filter = _should_use_confidence_filter(
+            self,
+            confidence_threshold,
+        )
+        use_padded_adaptive_draft = _should_use_padded_adaptive_draft(
+            self,
+            draft_length=effective_draft_length,
+            confidence_threshold=confidence_threshold,
+        ) and hasattr(self, "set_inputs_first_pass")
+        if not (use_confidence_filter or use_padded_adaptive_draft):
             return _call_original_propose(
                 original_propose,
                 supports_draft_length=original_propose_supports_draft_length,
@@ -918,21 +1166,29 @@ def _patch_spec_decode_eagle_module(module) -> None:
                 inputs=inputs,
             )
 
-        effective_draft_length = inputs.draft_length or self.num_speculative_tokens
-        if effective_draft_length <= 1:
+        if effective_draft_length <= 1 and not use_padded_adaptive_draft:
             return _call_original_propose(
                 original_propose,
                 supports_draft_length=original_propose_supports_draft_length,
                 instance=self,
                 inputs=inputs,
             )
+
+        target_hidden_states = inputs.target_hidden_states
+        if getattr(self, "method", None) == "eagle3":
+            eagle3_model_cls = getattr(module, "Eagle3LlamaForCausalLM", None)
+            if eagle3_model_cls is not None and isinstance(self.model, eagle3_model_cls):
+                target_hidden_states = self.model.combine_hidden_states(
+                    target_hidden_states
+                )
+                assert target_hidden_states.shape[-1] == self.hidden_size
 
         num_tokens, token_indices_to_sample, common_attn_metadata = (
             self.set_inputs_first_pass(
                 target_token_ids=inputs.target_token_ids,
                 next_token_ids=inputs.next_token_ids,
                 target_positions=inputs.target_positions,
-                target_hidden_states=inputs.target_hidden_states,
+                target_hidden_states=target_hidden_states,
                 token_indices_to_sample=inputs.token_indices_to_sample,
                 cad=inputs.common_attn_metadata,
                 num_rejected_tokens_gpu=inputs.num_rejected_tokens_gpu,
@@ -1011,7 +1267,7 @@ def _patch_spec_decode_eagle_module(module) -> None:
                 module,
                 state=state,
                 token_index=token_index,
-                confidence_threshold=confidence_threshold,
+                confidence_threshold=confidence_threshold if use_confidence_filter else 0.0,
             )
             if not should_continue:
                 break

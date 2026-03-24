@@ -76,6 +76,19 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         self.assertEqual(resolved.speculative_token_range, [1, 2, 4])
         self.assertEqual(resolved.draft_confidence_threshold, 0.8)
 
+    def test_resolve_speculative_token_settings_accepts_eagle3(self):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        resolved = adaptive_draft_model_patch.resolve_speculative_token_settings(
+            method="eagle3",
+            num_speculative_tokens=4,
+            speculative_token_range=[1, 2, 4],
+        )
+
+        self.assertEqual(resolved.num_speculative_tokens, 4)
+        self.assertEqual(resolved.speculative_token_range, [1, 2, 4])
+        self.assertEqual(resolved.draft_confidence_threshold, 0.0)
+
     def test_resolve_speculative_token_settings_rejects_invalid_confidence_threshold(
         self,
     ):
@@ -90,6 +103,37 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
                 num_speculative_tokens=4,
                 speculative_token_range=[1, 2, 4],
                 draft_confidence_threshold=1.1,
+            )
+
+    def test_resolve_speculative_token_settings_rejects_eagle3_confidence_threshold(
+        self,
+    ):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "draft_confidence_threshold is only supported for draft_model",
+        ):
+            adaptive_draft_model_patch.resolve_speculative_token_settings(
+                method="eagle3",
+                num_speculative_tokens=4,
+                speculative_token_range=[1, 2, 4],
+                draft_confidence_threshold=0.8,
+            )
+
+    def test_resolve_speculative_token_settings_rejects_range_above_max_spec_tokens(
+        self,
+    ):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "speculative_token_range must not contain values greater than num_speculative_tokens",
+        ):
+            adaptive_draft_model_patch.resolve_speculative_token_settings(
+                method="eagle3",
+                num_speculative_tokens=4,
+                speculative_token_range=[1, 2, 4, 8],
             )
 
     def test_apply_confidence_threshold_pads_following_positions(self):
@@ -144,6 +188,42 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         self.assertIn("wins-accel", output)
         self.assertIn("threshold-debug", output)
         self.assertIn("draft_length=2", output)
+
+    def test_should_use_padded_adaptive_draft_for_shorter_eagle3_length(self):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        instance = types.SimpleNamespace(
+            method="eagle3",
+            num_speculative_tokens=8,
+            parallel_drafting=False,
+            use_local_argmax_reduction=False,
+        )
+
+        self.assertTrue(
+            adaptive_draft_model_patch._should_use_padded_adaptive_draft(  # pylint: disable=protected-access
+                instance,
+                draft_length=4,
+                confidence_threshold=0.0,
+            )
+        )
+
+    def test_should_not_use_padded_adaptive_draft_for_full_length(self):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        instance = types.SimpleNamespace(
+            method="eagle3",
+            num_speculative_tokens=8,
+            parallel_drafting=False,
+            use_local_argmax_reduction=False,
+        )
+
+        self.assertFalse(
+            adaptive_draft_model_patch._should_use_padded_adaptive_draft(  # pylint: disable=protected-access
+                instance,
+                draft_length=8,
+                confidence_threshold=0.0,
+            )
+        )
 
     def test_patch_gpu_model_runner_trims_padded_tail_on_cpu_export(self):
         adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
@@ -231,6 +311,472 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
 
         self.assertEqual(runner.draft_length, 4)
         self.assertEqual(runner.uniform_decode_query_len, 5)
+
+    def test_patch_gpu_model_runner_initializes_controller_for_eagle3(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(
+                    method="eagle3",
+                    num_speculative_tokens=4,
+                    speculative_token_range=[1, 2, 4],
+                )
+                self.compilation_config = None
+                self.num_spec_tokens = 4
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+
+        self.assertIsNotNone(runner.draft_length_controller)
+        self.assertEqual(runner.draft_length, 4)
+        self.assertEqual(runner.uniform_decode_query_len, 1)
+
+    def test_patch_gpu_model_runner_uses_actual_draft_token_count_for_controller(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class SpyController:
+            def __init__(self):
+                self.calls = []
+
+            def observe_iteration(self, *, num_draft_tokens, num_accepted_tokens):
+                self.calls.append(
+                    {
+                        "num_draft_tokens": num_draft_tokens,
+                        "num_accepted_tokens": num_accepted_tokens,
+                    }
+                )
+                return 2
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(
+                    method="eagle3",
+                    speculative_token_range=None,
+                )
+                self.compilation_config = None
+                self.num_spec_tokens = 8
+                self.draft_length = 2
+                self.draft_length_controller = SpyController()
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_valid_sampled_token_count():
+                return [3, 4]
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return (
+                    [
+                        [11, 12, -1, -1],
+                        [21, 22, 23, -1],
+                    ],
+                    ["r1", "r2"],
+                )
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        runner._update_states_after_model_execute(None, None)  # pylint: disable=protected-access
+
+        self.assertEqual(
+            runner.draft_length_controller.calls,
+            [
+                {
+                    "num_draft_tokens": 5,
+                    "num_accepted_tokens": 5,
+                }
+            ],
+        )
+
+    def test_patch_gpu_model_runner_clamps_controller_acceptance_to_draft_count(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class SpyController:
+            def __init__(self):
+                self.calls = []
+
+            def observe_iteration(self, *, num_draft_tokens, num_accepted_tokens):
+                self.calls.append(
+                    {
+                        "num_draft_tokens": num_draft_tokens,
+                        "num_accepted_tokens": num_accepted_tokens,
+                    }
+                )
+                return 1
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(
+                    method="eagle3",
+                    speculative_token_range=None,
+                )
+                self.compilation_config = None
+                self.num_spec_tokens = 8
+                self.draft_length = 2
+                self.draft_length_controller = SpyController()
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_valid_sampled_token_count():
+                return [4]
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return ([[11, 12, -1, -1]], ["r1"])
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        runner._update_states_after_model_execute(None, None)  # pylint: disable=protected-access
+
+        self.assertEqual(
+            runner.draft_length_controller.calls,
+            [
+                {
+                    "num_draft_tokens": 2,
+                    "num_accepted_tokens": 2,
+                }
+            ],
+        )
+
+    def test_patch_gpu_model_runner_passes_draft_length_to_eagle3_proposer(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeDrafter:
+            def __init__(self):
+                self.last_kwargs = None
+                self.supports_mm_inputs = False
+
+            @staticmethod
+            def prepare_next_token_ids_cpu(*args, **kwargs):
+                del args, kwargs
+                return "next"
+
+            def propose(self, **kwargs):
+                self.last_kwargs = kwargs
+                return "ok"
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(
+                    method="eagle3",
+                    disable_padded_drafter_batch=True,
+                )
+                self.draft_length = 2
+                self.drafter = FakeDrafter()
+                self.requests = {}
+                self.input_batch = types.SimpleNamespace(
+                    num_tokens_no_spec=None,
+                    token_ids_cpu=None,
+                )
+                self.use_aux_hidden_state_outputs = False
+                self.supports_mm_inputs = False
+                self.input_ids = types.SimpleNamespace(gpu=["tok0", "tok1"])
+
+            @staticmethod
+            def _get_positions(num_tokens):
+                return [f"pos{index}" for index in range(num_tokens)]
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+            def propose_draft_token_ids(
+                self,
+                scheduler_output,
+                sampled_token_ids,
+                sampling_metadata,
+                hidden_states,
+                sample_hidden_states,
+                aux_hidden_states,
+                spec_decode_metadata,
+                common_attn_metadata,
+                slot_mappings,
+            ):
+                del (
+                    scheduler_output,
+                    sampled_token_ids,
+                    aux_hidden_states,
+                    spec_decode_metadata,
+                )
+                return self.drafter.propose(
+                    target_hidden_states=hidden_states,
+                    sampling_metadata=sampling_metadata,
+                    slot_mappings=slot_mappings,
+                    common_attn_metadata=common_attn_metadata,
+                )
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        result = runner.propose_draft_token_ids(
+            scheduler_output=types.SimpleNamespace(
+                total_num_scheduled_tokens=1,
+                num_scheduled_tokens={},
+            ),
+            sampled_token_ids=[],
+            sampling_metadata="sampling",
+            hidden_states=["hidden0", "hidden1"],
+            sample_hidden_states=None,
+            aux_hidden_states=None,
+            spec_decode_metadata=None,
+            common_attn_metadata="attn",
+            slot_mappings="slots",
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(runner.drafter.last_kwargs["draft_length"], 2)
+        self.assertEqual(runner.drafter.last_kwargs["target_hidden_states"], ["hidden0"])
+
+    def test_patch_gpu_model_runner_handles_padded_eagle3_path(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeDrafter:
+            def __init__(self):
+                self.last_kwargs = None
+                self.supports_mm_inputs = False
+
+            @staticmethod
+            def prepare_next_token_ids_padded(*args, **kwargs):
+                del args, kwargs
+                return torch.tensor([3], dtype=torch.int32), torch.tensor(
+                    [1], dtype=torch.int32
+                )
+
+            @staticmethod
+            def prepare_inputs_padded(*args, **kwargs):
+                del args, kwargs
+                return types.SimpleNamespace(num_actual_tokens=1), None, None
+
+            def propose(self, **kwargs):
+                self.last_kwargs = kwargs
+                return "ok"
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(
+                    method="eagle3",
+                    disable_padded_drafter_batch=False,
+                )
+                self.draft_length = 2
+                self.drafter = FakeDrafter()
+                self.requests = {}
+                self.input_batch = types.SimpleNamespace()
+                self.use_aux_hidden_state_outputs = False
+                self.supports_mm_inputs = False
+                self.discard_request_mask = types.SimpleNamespace(gpu=torch.tensor([False]))
+                self.input_ids = types.SimpleNamespace(
+                    gpu=torch.tensor([7], dtype=torch.int32)
+                )
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+            @staticmethod
+            def _copy_valid_sampled_token_count(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_positions(num_tokens):
+                return torch.arange(num_tokens, dtype=torch.int32)
+
+            def propose_draft_token_ids(
+                self,
+                scheduler_output,
+                sampled_token_ids,
+                sampling_metadata,
+                hidden_states,
+                sample_hidden_states,
+                aux_hidden_states,
+                spec_decode_metadata,
+                common_attn_metadata,
+                slot_mappings,
+            ):
+                del (
+                    scheduler_output,
+                    sampled_token_ids,
+                    sampling_metadata,
+                    hidden_states,
+                    sample_hidden_states,
+                    aux_hidden_states,
+                    spec_decode_metadata,
+                    common_attn_metadata,
+                    slot_mappings,
+                )
+                return "original"
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        result = runner.propose_draft_token_ids(
+            scheduler_output=types.SimpleNamespace(
+                total_num_scheduled_tokens=1,
+                num_scheduled_tokens={},
+            ),
+            sampled_token_ids=torch.tensor([[3]], dtype=torch.int32),
+            sampling_metadata="sampling",
+            hidden_states=torch.tensor([[1.0]], dtype=torch.float32),
+            sample_hidden_states=None,
+            aux_hidden_states=None,
+            spec_decode_metadata=types.SimpleNamespace(num_draft_tokens=[1]),
+            common_attn_metadata=types.SimpleNamespace(),
+            slot_mappings="slots",
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(runner.drafter.last_kwargs["draft_length"], 2)
+
+    def test_patch_spec_decode_eagle_uses_runner_draft_length_for_eagle3(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeSpecDecodeBaseProposer:
+            def __init__(self):
+                self.runner = types.SimpleNamespace(draft_length=2)
+                self.num_speculative_tokens = 4
+                self.method = "eagle3"
+                self.parallel_drafting = False
+                self.use_local_argmax_reduction = False
+                self.speculative_config = types.SimpleNamespace(
+                    draft_confidence_threshold=0.0
+                )
+
+            def propose(
+                self,
+                target_token_ids,
+                target_positions,
+                target_hidden_states,
+                next_token_ids,
+                token_indices_to_sample,
+                common_attn_metadata,
+                sampling_metadata,
+                mm_embed_inputs=None,
+                num_rejected_tokens_gpu=None,
+                slot_mappings=None,
+            ):
+                del (
+                    target_token_ids,
+                    target_positions,
+                    target_hidden_states,
+                    next_token_ids,
+                    token_indices_to_sample,
+                    common_attn_metadata,
+                    sampling_metadata,
+                    mm_embed_inputs,
+                    num_rejected_tokens_gpu,
+                    slot_mappings,
+                )
+                return self.num_speculative_tokens
+
+        fake_module = types.SimpleNamespace(
+            SpecDecodeBaseProposer=FakeSpecDecodeBaseProposer
+        )
+
+        adaptive_draft_model_patch._patch_spec_decode_eagle_module(fake_module)  # pylint: disable=protected-access
+
+        proposer = fake_module.SpecDecodeBaseProposer()
+
+        result = proposer.propose(None, None, None, None, None, None, None)
+
+        self.assertEqual(result, 2)
+        self.assertEqual(proposer.num_speculative_tokens, 4)
+
+    def test_patch_spec_decode_eagle_accepts_explicit_draft_length_kwarg(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeSpecDecodeBaseProposer:
+            def __init__(self):
+                self.runner = None
+                self.num_speculative_tokens = 4
+                self.method = "eagle3"
+                self.parallel_drafting = False
+                self.use_local_argmax_reduction = False
+                self.speculative_config = types.SimpleNamespace(
+                    draft_confidence_threshold=0.0
+                )
+
+            def propose(
+                self,
+                target_token_ids,
+                target_positions,
+                target_hidden_states,
+                next_token_ids,
+                token_indices_to_sample,
+                common_attn_metadata,
+                sampling_metadata,
+                mm_embed_inputs=None,
+                num_rejected_tokens_gpu=None,
+                slot_mappings=None,
+            ):
+                del (
+                    target_token_ids,
+                    target_positions,
+                    target_hidden_states,
+                    next_token_ids,
+                    token_indices_to_sample,
+                    common_attn_metadata,
+                    sampling_metadata,
+                    mm_embed_inputs,
+                    num_rejected_tokens_gpu,
+                    slot_mappings,
+                )
+                return self.num_speculative_tokens
+
+        fake_module = types.SimpleNamespace(
+            SpecDecodeBaseProposer=FakeSpecDecodeBaseProposer
+        )
+
+        adaptive_draft_model_patch._patch_spec_decode_eagle_module(fake_module)  # pylint: disable=protected-access
+
+        proposer = fake_module.SpecDecodeBaseProposer()
+
+        result = proposer.propose(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            draft_length=2,
+        )
+
+        self.assertEqual(result, 2)
+        self.assertEqual(proposer.num_speculative_tokens, 4)
 
 
 if __name__ == "__main__":

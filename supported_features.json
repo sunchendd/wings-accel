@@ -10,7 +10,7 @@
           "is_default": true,
           "features": {
             "adaptive_draft_model": {
-              "description": "Enable adaptive draft lengths for pure draft_model speculative decoding on vLLM 0.17.0"
+              "description": "Enable adaptive draft lengths for draft_model and eagle3 speculative decoding on vLLM 0.17.0"
             }
           }
         }

@@ -57,7 +57,7 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
-| vllm | 0.17.0 | adaptive_draft_model | 为纯 `draft_model` 投机解码启用动态长度控制 |
+| vllm | 0.17.0 | adaptive_draft_model | 为 `draft_model` 和 `eagle3` 投机解码启用动态长度控制 |
 
 ## CLI 参考
 
