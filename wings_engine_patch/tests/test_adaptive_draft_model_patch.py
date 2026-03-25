@@ -1,5 +1,8 @@
+import ast
+import inspect
 import os
 import sys
+import textwrap
 import unittest
 import importlib.util
 import io
@@ -39,6 +42,83 @@ def _load_patch_module():
     )
 
     return adaptive_draft_model_patch
+
+
+def _get_function_node(function):
+    source = textwrap.dedent(inspect.getsource(function))
+    module = ast.parse(source)
+    return module.body[0]
+
+
+def _get_nested_function_node(function, nested_name):
+    function_node = _get_function_node(function)
+    for node in ast.walk(function_node):
+        if isinstance(node, ast.FunctionDef) and node.name == nested_name:
+            return node
+    raise AssertionError(f"Failed to find nested function: {nested_name}")
+
+
+_GPU_RUNNER_PROPOSE_PARAMETER_NAMES = (
+    "scheduler_output",
+    "sampled_token_ids",
+    "sampling_metadata",
+    "hidden_states",
+    "sample_hidden_states",
+    "aux_hidden_states",
+    "spec_decode_metadata",
+    "common_attn_metadata",
+    "slot_mappings",
+)
+
+_SPEC_DECODE_PROPOSE_PARAMETER_NAMES = (
+    "target_token_ids",
+    "target_positions",
+    "target_hidden_states",
+    "next_token_ids",
+    "token_indices_to_sample",
+    "common_attn_metadata",
+    "sampling_metadata",
+)
+
+_SPEC_DECODE_OPTIONAL_PARAMETER_NAMES = (
+    "mm_embed_inputs",
+    "num_rejected_tokens_gpu",
+    "slot_mappings",
+)
+
+
+def _build_signature(parameter_names, *, optional_parameter_names=()):
+    return inspect.Signature(
+        [
+            inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for name in parameter_names
+        ]
+        + [
+            inspect.Parameter(
+                name,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                default=None,
+            )
+            for name in optional_parameter_names
+        ]
+    )
+
+
+def _bind_fake_call(parameter_names, args, kwargs, *, optional_parameter_names=()):
+    bound_arguments = _build_signature(
+        parameter_names,
+        optional_parameter_names=optional_parameter_names,
+    ).bind(*args, **kwargs)
+    bound_arguments.apply_defaults()
+    return bound_arguments.arguments
+
+
+def _attach_fake_signature(function, parameter_names, *, optional_parameter_names=()):
+    function.__signature__ = _build_signature(
+        parameter_names,
+        optional_parameter_names=optional_parameter_names,
+    )
+    return function
 
 
 class TestAdaptiveDraftModelManifest(unittest.TestCase):
@@ -171,6 +251,25 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
                     dtype=torch.int64,
                 ),
             )
+        )
+
+    def test_apply_confidence_threshold_uses_module_scope_torch(self):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        function_node = _get_function_node(
+            adaptive_draft_model_patch.apply_confidence_threshold_to_draft_tokens
+        )
+        local_torch_imports = [
+            node
+            for node in ast.walk(function_node)
+            if isinstance(node, ast.Import)
+            and any(alias.name == "torch" for alias in node.names)
+        ]
+
+        self.assertEqual(
+            local_torch_imports,
+            [],
+            "apply_confidence_threshold_to_draft_tokens should rely on the module-scope torch import",
         )
 
     def test_log_runtime_state_emits_wins_accel_keyword(self):
@@ -507,30 +606,30 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
             def _get_draft_token_ids_cpu():
                 return [], []
 
-            def propose_draft_token_ids(
-                self,
-                scheduler_output,
-                sampled_token_ids,
-                sampling_metadata,
-                hidden_states,
-                sample_hidden_states,
-                aux_hidden_states,
-                spec_decode_metadata,
-                common_attn_metadata,
-                slot_mappings,
-            ):
+            def propose_draft_token_ids(self, *args, **kwargs):
+                arguments = _bind_fake_call(
+                    ("self", *_GPU_RUNNER_PROPOSE_PARAMETER_NAMES),
+                    (self, *args),
+                    kwargs,
+                )
                 del (
-                    scheduler_output,
-                    sampled_token_ids,
-                    aux_hidden_states,
-                    spec_decode_metadata,
+                    arguments["scheduler_output"],
+                    arguments["sampled_token_ids"],
+                    arguments["sample_hidden_states"],
+                    arguments["aux_hidden_states"],
+                    arguments["spec_decode_metadata"],
                 )
                 return self.drafter.propose(
-                    target_hidden_states=hidden_states,
-                    sampling_metadata=sampling_metadata,
-                    slot_mappings=slot_mappings,
-                    common_attn_metadata=common_attn_metadata,
+                    target_hidden_states=arguments["hidden_states"],
+                    sampling_metadata=arguments["sampling_metadata"],
+                    slot_mappings=arguments["slot_mappings"],
+                    common_attn_metadata=arguments["common_attn_metadata"],
                 )
+
+            propose_draft_token_ids = _attach_fake_signature(
+                propose_draft_token_ids,
+                ("self", *_GPU_RUNNER_PROPOSE_PARAMETER_NAMES),
+            )
 
         fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
 
@@ -613,30 +712,31 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
             def _get_positions(num_tokens):
                 return torch.arange(num_tokens, dtype=torch.int32)
 
-            @staticmethod
-            def propose_draft_token_ids(
-                scheduler_output,
-                sampled_token_ids,
-                sampling_metadata,
-                hidden_states,
-                sample_hidden_states,
-                aux_hidden_states,
-                spec_decode_metadata,
-                common_attn_metadata,
-                slot_mappings,
-            ):
+            def propose_draft_token_ids(*args, **kwargs):
+                arguments = _bind_fake_call(
+                    _GPU_RUNNER_PROPOSE_PARAMETER_NAMES,
+                    args,
+                    kwargs,
+                )
                 del (
-                    scheduler_output,
-                    sampled_token_ids,
-                    sampling_metadata,
-                    hidden_states,
-                    sample_hidden_states,
-                    aux_hidden_states,
-                    spec_decode_metadata,
-                    common_attn_metadata,
-                    slot_mappings,
+                    arguments["scheduler_output"],
+                    arguments["sampled_token_ids"],
+                    arguments["sampling_metadata"],
+                    arguments["hidden_states"],
+                    arguments["sample_hidden_states"],
+                    arguments["aux_hidden_states"],
+                    arguments["spec_decode_metadata"],
+                    arguments["common_attn_metadata"],
+                    arguments["slot_mappings"],
                 )
                 return "original"
+
+            propose_draft_token_ids = staticmethod(
+                _attach_fake_signature(
+                    propose_draft_token_ids,
+                    _GPU_RUNNER_PROPOSE_PARAMETER_NAMES,
+                )
+            )
 
         fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
 
@@ -661,6 +761,178 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(runner.drafter.last_kwargs["draft_length"], 2)
 
+    def test_patch_gpu_model_runner_falls_back_to_original_instance_proposer(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(method="unsupported")
+                self.original_call = None
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+            def propose_draft_token_ids(self, *args, **kwargs):
+                self.original_call = _bind_fake_call(
+                    ("self", *_GPU_RUNNER_PROPOSE_PARAMETER_NAMES),
+                    (self, *args),
+                    kwargs,
+                )
+                return "original-instance"
+
+            propose_draft_token_ids = _attach_fake_signature(
+                propose_draft_token_ids,
+                ("self", *_GPU_RUNNER_PROPOSE_PARAMETER_NAMES),
+            )
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        scheduler_output = types.SimpleNamespace(
+            total_num_scheduled_tokens=1,
+            num_scheduled_tokens={},
+        )
+        result = runner.propose_draft_token_ids(
+            scheduler_output=scheduler_output,
+            sampled_token_ids=["tok0"],
+            sampling_metadata="sampling",
+            hidden_states=["hidden0"],
+            sample_hidden_states="sample-hidden",
+            aux_hidden_states="aux-hidden",
+            spec_decode_metadata="spec-metadata",
+            common_attn_metadata="attn",
+            slot_mappings="slots",
+        )
+
+        self.assertEqual(result, "original-instance")
+        self.assertIs(runner.original_call["self"], runner)
+        self.assertIs(runner.original_call["scheduler_output"], scheduler_output)
+        self.assertEqual(runner.original_call["sampling_metadata"], "sampling")
+        self.assertEqual(runner.original_call["slot_mappings"], "slots")
+
+    def test_patch_gpu_model_runner_falls_back_to_original_staticmethod_proposer(self):
+        adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
+        original_calls = []
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = None
+
+            @staticmethod
+            def _update_states_after_model_execute(*args, **kwargs):
+                return None
+
+            @staticmethod
+            def _get_draft_token_ids_cpu():
+                return [], []
+
+            def propose_draft_token_ids(*args, **kwargs):
+                original_calls.append(
+                    _bind_fake_call(
+                        _GPU_RUNNER_PROPOSE_PARAMETER_NAMES,
+                        args,
+                        kwargs,
+                    )
+                )
+                return "original-static"
+
+            propose_draft_token_ids = staticmethod(
+                _attach_fake_signature(
+                    propose_draft_token_ids,
+                    _GPU_RUNNER_PROPOSE_PARAMETER_NAMES,
+                )
+            )
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        adaptive_draft_model_patch._patch_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+
+        runner = fake_module.GPUModelRunner()
+        scheduler_output = types.SimpleNamespace(
+            total_num_scheduled_tokens=1,
+            num_scheduled_tokens={},
+        )
+        result = runner.propose_draft_token_ids(
+            scheduler_output=scheduler_output,
+            sampled_token_ids=["tok0"],
+            sampling_metadata="sampling",
+            hidden_states=["hidden0"],
+            sample_hidden_states="sample-hidden",
+            aux_hidden_states="aux-hidden",
+            spec_decode_metadata="spec-metadata",
+            common_attn_metadata="attn",
+            slot_mappings="slots",
+        )
+
+        self.assertEqual(result, "original-static")
+        self.assertEqual(len(original_calls), 1)
+        self.assertIs(original_calls[0]["scheduler_output"], scheduler_output)
+        self.assertEqual(original_calls[0]["sample_hidden_states"], "sample-hidden")
+        self.assertEqual(original_calls[0]["common_attn_metadata"], "attn")
+
+    def test_patch_gpu_model_runner_routes_protected_helpers_through_call_member(
+        self,
+    ):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        patched_propose_node = _get_nested_function_node(
+            adaptive_draft_model_patch._patch_gpu_model_runner_module,
+            "patched_propose_draft_token_ids",
+        )
+        direct_helper_accesses = sorted(
+            {
+                node.attr
+                for node in ast.walk(patched_propose_node)
+                if isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "self"
+                and node.attr
+                in {
+                    "_copy_valid_sampled_token_count",
+                    "_get_positions",
+                    "_gather_mm_embeddings",
+                }
+            }
+        )
+
+        self.assertEqual(
+            direct_helper_accesses,
+            [],
+            "patched_propose_draft_token_ids should avoid direct protected helper access and use _call_member(self, ...)",
+        )
+
+    def test_patch_gpu_model_runner_limits_named_parameters_on_patched_propose(
+        self,
+    ):
+        adaptive_draft_model_patch = _load_patch_module()
+
+        patched_propose_node = _get_nested_function_node(
+            adaptive_draft_model_patch._patch_gpu_model_runner_module,
+            "patched_propose_draft_token_ids",
+        )
+        named_parameters = [
+            arg.arg
+            for arg in (
+                patched_propose_node.args.posonlyargs
+                + patched_propose_node.args.args
+                + patched_propose_node.args.kwonlyargs
+            )
+            if arg.arg != "self"
+        ]
+
+        self.assertLessEqual(
+            len(named_parameters),
+            5,
+            "patched_propose_draft_token_ids should avoid a warning-level named parameter count across positional-only, standard, and keyword-only parameters",
+        )
+
     def test_patch_spec_decode_eagle_uses_runner_draft_length_for_eagle3(self):
         adaptive_draft_model_patch = _load_patch_module()  # pylint: disable=function-ret
 
@@ -675,32 +947,32 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
                     draft_confidence_threshold=0.0
                 )
 
-            def propose(
-                self,
-                target_token_ids,
-                target_positions,
-                target_hidden_states,
-                next_token_ids,
-                token_indices_to_sample,
-                common_attn_metadata,
-                sampling_metadata,
-                mm_embed_inputs=None,
-                num_rejected_tokens_gpu=None,
-                slot_mappings=None,
-            ):
+            def propose(self, *args, **kwargs):
+                arguments = _bind_fake_call(
+                    ("self", *_SPEC_DECODE_PROPOSE_PARAMETER_NAMES),
+                    (self, *args),
+                    kwargs,
+                    optional_parameter_names=_SPEC_DECODE_OPTIONAL_PARAMETER_NAMES,
+                )
                 del (
-                    target_token_ids,
-                    target_positions,
-                    target_hidden_states,
-                    next_token_ids,
-                    token_indices_to_sample,
-                    common_attn_metadata,
-                    sampling_metadata,
-                    mm_embed_inputs,
-                    num_rejected_tokens_gpu,
-                    slot_mappings,
+                    arguments["target_token_ids"],
+                    arguments["target_positions"],
+                    arguments["target_hidden_states"],
+                    arguments["next_token_ids"],
+                    arguments["token_indices_to_sample"],
+                    arguments["common_attn_metadata"],
+                    arguments["sampling_metadata"],
+                    arguments["mm_embed_inputs"],
+                    arguments["num_rejected_tokens_gpu"],
+                    arguments["slot_mappings"],
                 )
                 return self.num_speculative_tokens
+
+            propose = _attach_fake_signature(
+                propose,
+                ("self", *_SPEC_DECODE_PROPOSE_PARAMETER_NAMES),
+                optional_parameter_names=_SPEC_DECODE_OPTIONAL_PARAMETER_NAMES,
+            )
 
         fake_module = types.SimpleNamespace(
             SpecDecodeBaseProposer=FakeSpecDecodeBaseProposer
@@ -729,32 +1001,32 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
                     draft_confidence_threshold=0.0
                 )
 
-            def propose(
-                self,
-                target_token_ids,
-                target_positions,
-                target_hidden_states,
-                next_token_ids,
-                token_indices_to_sample,
-                common_attn_metadata,
-                sampling_metadata,
-                mm_embed_inputs=None,
-                num_rejected_tokens_gpu=None,
-                slot_mappings=None,
-            ):
+            def propose(self, *args, **kwargs):
+                arguments = _bind_fake_call(
+                    ("self", *_SPEC_DECODE_PROPOSE_PARAMETER_NAMES),
+                    (self, *args),
+                    kwargs,
+                    optional_parameter_names=_SPEC_DECODE_OPTIONAL_PARAMETER_NAMES,
+                )
                 del (
-                    target_token_ids,
-                    target_positions,
-                    target_hidden_states,
-                    next_token_ids,
-                    token_indices_to_sample,
-                    common_attn_metadata,
-                    sampling_metadata,
-                    mm_embed_inputs,
-                    num_rejected_tokens_gpu,
-                    slot_mappings,
+                    arguments["target_token_ids"],
+                    arguments["target_positions"],
+                    arguments["target_hidden_states"],
+                    arguments["next_token_ids"],
+                    arguments["token_indices_to_sample"],
+                    arguments["common_attn_metadata"],
+                    arguments["sampling_metadata"],
+                    arguments["mm_embed_inputs"],
+                    arguments["num_rejected_tokens_gpu"],
+                    arguments["slot_mappings"],
                 )
                 return self.num_speculative_tokens
+
+            propose = _attach_fake_signature(
+                propose,
+                ("self", *_SPEC_DECODE_PROPOSE_PARAMETER_NAMES),
+                optional_parameter_names=_SPEC_DECODE_OPTIONAL_PARAMETER_NAMES,
+            )
 
         fake_module = types.SimpleNamespace(
             SpecDecodeBaseProposer=FakeSpecDecodeBaseProposer

@@ -185,8 +185,6 @@ def apply_confidence_threshold_to_draft_tokens(
     if draft_confidence_threshold <= 0.0:
         return draft_token_ids
 
-    import torch
-
     if draft_token_ids.ndim != 2 or draft_token_confidences.ndim != 2:
         raise ValueError("draft_token_ids and draft_token_confidences must be rank-2.")
     if draft_token_ids.shape != draft_token_confidences.shape:
@@ -322,6 +320,19 @@ class DraftIterationState:
     cudagraph_runtime_mode: object
 
 
+@dataclass
+class GPUModelRunnerProposeInputs:
+    scheduler_output: object
+    sampled_token_ids: object
+    sampling_metadata: object
+    hidden_states: object
+    sample_hidden_states: object
+    aux_hidden_states: object
+    spec_decode_metadata: object
+    common_attn_metadata: object
+    slot_mappings: object
+
+
 def _bind_propose_inputs(original_propose, instance, args, kwargs) -> ProposeInputs:
     signature = inspect.signature(original_propose)
     bind_kwargs = dict(kwargs)
@@ -343,6 +354,33 @@ def _bind_propose_inputs(original_propose, instance, args, kwargs) -> ProposeInp
         num_rejected_tokens_gpu=arguments.get("num_rejected_tokens_gpu"),
         slot_mappings=arguments.get("slot_mappings"),
         draft_length=arguments.get("draft_length", explicit_draft_length),
+    )
+
+
+def _bind_gpu_model_runner_propose_inputs(
+    raw_method,
+    original_method,
+    instance,
+    args,
+    kwargs,
+) -> GPUModelRunnerProposeInputs:
+    signature = inspect.signature(original_method)
+    if isinstance(raw_method, staticmethod):
+        bound_arguments = signature.bind(*args, **kwargs)
+    else:
+        bound_arguments = signature.bind(instance, *args, **kwargs)
+    bound_arguments.apply_defaults()
+    arguments = bound_arguments.arguments
+    return GPUModelRunnerProposeInputs(
+        scheduler_output=arguments["scheduler_output"],
+        sampled_token_ids=arguments["sampled_token_ids"],
+        sampling_metadata=arguments["sampling_metadata"],
+        hidden_states=arguments["hidden_states"],
+        sample_hidden_states=arguments["sample_hidden_states"],
+        aux_hidden_states=arguments["aux_hidden_states"],
+        spec_decode_metadata=arguments["spec_decode_metadata"],
+        common_attn_metadata=arguments["common_attn_metadata"],
+        slot_mappings=arguments["slot_mappings"],
     )
 
 
@@ -953,35 +991,49 @@ def _patch_gpu_model_runner_module(module) -> None:
         "_wings_adaptive_draft_patched",
         False,
     ):
+        raw_propose_draft_token_ids = inspect.getattr_static(
+            runner_cls,
+            "propose_draft_token_ids",
+        )
 
         def patched_propose_draft_token_ids(
             self,
-            scheduler_output,
-            sampled_token_ids,
-            sampling_metadata,
-            hidden_states,
-            sample_hidden_states,
-            aux_hidden_states,
-            spec_decode_metadata,
-            common_attn_metadata,
-            slot_mappings,
+            *args,
+            **kwargs,
         ):
+            inputs = _bind_gpu_model_runner_propose_inputs(
+                raw_propose_draft_token_ids,
+                original_propose_draft_token_ids,
+                self,
+                args,
+                kwargs,
+            )
+            scheduler_output = inputs.scheduler_output
+            sampled_token_ids = inputs.sampled_token_ids
+            sampling_metadata = inputs.sampling_metadata
+            hidden_states = inputs.hidden_states
+            aux_hidden_states = inputs.aux_hidden_states
+            spec_decode_metadata = inputs.spec_decode_metadata
+            common_attn_metadata = inputs.common_attn_metadata
+            slot_mappings = inputs.slot_mappings
             spec_config = getattr(self, "speculative_config", None)
             if not (
                 spec_config is not None
                 and _supports_adaptive_draft_length(getattr(spec_config, "method", None))
             ):
-                return original_propose_draft_token_ids(
+                return _call_original_class_method(
+                    raw_propose_draft_token_ids,
+                    original_propose_draft_token_ids,
                     self,
-                    scheduler_output,
-                    sampled_token_ids,
-                    sampling_metadata,
-                    hidden_states,
-                    sample_hidden_states,
-                    aux_hidden_states,
-                    spec_decode_metadata,
-                    common_attn_metadata,
-                    slot_mappings,
+                    inputs.scheduler_output,
+                    inputs.sampled_token_ids,
+                    inputs.sampling_metadata,
+                    inputs.hidden_states,
+                    inputs.sample_hidden_states,
+                    inputs.aux_hidden_states,
+                    inputs.spec_decode_metadata,
+                    inputs.common_attn_metadata,
+                    inputs.slot_mappings,
                 )
 
             num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
@@ -1012,7 +1064,9 @@ def _patch_gpu_model_runner_module(module) -> None:
                         self.discard_request_mask.gpu,
                     )
                 )
-                self._copy_valid_sampled_token_count(
+                _call_member(
+                    self,
+                    "_copy_valid_sampled_token_count",
                     next_token_ids, valid_sampled_tokens_count
                 )
 
@@ -1020,10 +1074,17 @@ def _patch_gpu_model_runner_module(module) -> None:
             if spec_decode_metadata is None:
                 token_indices_to_sample = None
                 target_token_ids = self.input_ids.gpu[:num_scheduled_tokens]
-                target_positions = self._get_positions(num_scheduled_tokens)
+                target_positions = _call_member(
+                    self,
+                    "_get_positions",
+                    num_scheduled_tokens,
+                )
                 if self.use_aux_hidden_state_outputs:
                     if aux_hidden_states is None:
-                        raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
+                        raise ValueError(
+                            "aux_hidden_states cannot be None when "
+                            "use_aux_hidden_state_outputs is True"
+                        )
                     target_hidden_states = torch.cat(
                         [h[:num_scheduled_tokens] for h in aux_hidden_states], dim=-1
                     )
@@ -1038,10 +1099,17 @@ def _patch_gpu_model_runner_module(module) -> None:
                         spec_decode_metadata.num_draft_tokens,
                     )
                     target_token_ids = self.input_ids.gpu[token_indices]
-                    target_positions = self._get_positions(token_indices)
+                    target_positions = _call_member(
+                        self,
+                        "_get_positions",
+                        token_indices,
+                    )
                     if self.use_aux_hidden_state_outputs:
                         if aux_hidden_states is None:
-                            raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
+                            raise ValueError(
+                                "aux_hidden_states cannot be None when "
+                                "use_aux_hidden_state_outputs is True"
+                            )
                         target_hidden_states = torch.cat(
                             [h[token_indices] for h in aux_hidden_states], dim=-1
                         )
@@ -1059,10 +1127,17 @@ def _patch_gpu_model_runner_module(module) -> None:
                     )
                     total_num_tokens = common_attn_metadata.num_actual_tokens
                     target_token_ids = self.input_ids.gpu[:total_num_tokens]
-                    target_positions = self._get_positions(total_num_tokens)
+                    target_positions = _call_member(
+                        self,
+                        "_get_positions",
+                        total_num_tokens,
+                    )
                     if self.use_aux_hidden_state_outputs:
                         if aux_hidden_states is None:
-                            raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
+                            raise ValueError(
+                                "aux_hidden_states cannot be None when "
+                                "use_aux_hidden_state_outputs is True"
+                            )
                         target_hidden_states = torch.cat(
                             [h[:total_num_tokens] for h in aux_hidden_states], dim=-1
                         )
@@ -1070,7 +1145,9 @@ def _patch_gpu_model_runner_module(module) -> None:
                         target_hidden_states = hidden_states[:total_num_tokens]
 
             if self.supports_mm_inputs and self.drafter.supports_mm_inputs:
-                mm_embed_inputs = self._gather_mm_embeddings(
+                mm_embed_inputs = _call_member(
+                    self,
+                    "_gather_mm_embeddings",
                     scheduler_output,
                     shift_computed_tokens=1,
                 )

@@ -1,11 +1,10 @@
 import os
 import sys
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from unittest.mock import patch
-
-import tomllib
 
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
