@@ -1064,10 +1064,11 @@ def _patch_gpu_model_runner_module(module) -> None:
                         self.discard_request_mask.gpu,
                     )
                 )
-                _call_member(
+                _ = _call_member(
                     self,
                     "_copy_valid_sampled_token_count",
-                    next_token_ids, valid_sampled_tokens_count
+                    next_token_ids,
+                    valid_sampled_tokens_count,
                 )
 
             num_rejected_tokens_gpu = None
@@ -1264,7 +1265,11 @@ def _patch_spec_decode_eagle_module(module) -> None:
                     target_hidden_states
                 )
                 if target_hidden_states.shape[-1] != self.hidden_size:
-                    raise ValueError(f"target_hidden_states.shape[-1] {target_hidden_states.shape[-1]} != self.hidden_size {self.hidden_size}")
+                    raise ValueError(
+                        "target_hidden_states.shape[-1] "
+                        f"{target_hidden_states.shape[-1]} "
+                        f"!= self.hidden_size {self.hidden_size}"
+                    )
 
         num_tokens, token_indices_to_sample, common_attn_metadata = (
             self.set_inputs_first_pass(

@@ -58,6 +58,48 @@ def _get_nested_function_node(function, nested_name):
     raise AssertionError(f"Failed to find nested function: {nested_name}")
 
 
+def _get_module_member(module, name):
+    return getattr(module, name)
+
+
+def _find_self_attribute_names(function_node, target_names):
+    matching_names = set()
+    for node in ast.walk(function_node):
+        if not isinstance(node, ast.Attribute):
+            continue
+        if not isinstance(node.value, ast.Name):
+            continue
+        if node.value.id != "self" or node.attr not in target_names:
+            continue
+        matching_names.add(node.attr)
+    return sorted(matching_names)
+
+
+def _get_named_parameters(function_node):
+    named_parameters = []
+    for parameter_group in (
+        function_node.args.posonlyargs,
+        function_node.args.args,
+        function_node.args.kwonlyargs,
+    ):
+        for argument in parameter_group:
+            if argument.arg == "self":
+                continue
+            named_parameters.append(argument.arg)
+    return named_parameters
+
+
+def _find_imports(function_node, module_name):
+    matching_imports = []
+    for node in ast.walk(function_node):
+        if not isinstance(node, ast.Import):
+            continue
+        imported_names = [alias.name for alias in node.names]
+        if module_name in imported_names:
+            matching_imports.append(node)
+    return matching_imports
+
+
 _GPU_RUNNER_PROPOSE_PARAMETER_NAMES = (
     "scheduler_output",
     "sampled_token_ids",
@@ -259,12 +301,7 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
         function_node = _get_function_node(
             adaptive_draft_model_patch.apply_confidence_threshold_to_draft_tokens
         )
-        local_torch_imports = [
-            node
-            for node in ast.walk(function_node)
-            if isinstance(node, ast.Import)
-            and any(alias.name == "torch" for alias in node.names)
-        ]
+        local_torch_imports = _find_imports(function_node, "torch")
 
         self.assertEqual(
             local_torch_imports,
@@ -882,30 +919,28 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
     ):
         adaptive_draft_model_patch = _load_patch_module()
 
+        patch_gpu_model_runner_module = _get_module_member(
+            adaptive_draft_model_patch,
+            "_patch_gpu_model_runner_module",
+        )
         patched_propose_node = _get_nested_function_node(
-            adaptive_draft_model_patch._patch_gpu_model_runner_module,
+            patch_gpu_model_runner_module,
             "patched_propose_draft_token_ids",
         )
-        direct_helper_accesses = sorted(
+        direct_helper_accesses = _find_self_attribute_names(
+            patched_propose_node,
             {
-                node.attr
-                for node in ast.walk(patched_propose_node)
-                if isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "self"
-                and node.attr
-                in {
-                    "_copy_valid_sampled_token_count",
-                    "_get_positions",
-                    "_gather_mm_embeddings",
-                }
-            }
+                "_copy_valid_sampled_token_count",
+                "_get_positions",
+                "_gather_mm_embeddings",
+            },
         )
 
         self.assertEqual(
             direct_helper_accesses,
             [],
-            "patched_propose_draft_token_ids should avoid direct protected helper access and use _call_member(self, ...)",
+            "patched_propose_draft_token_ids should avoid direct protected "
+            "helper access and use _call_member(self, ...)",
         )
 
     def test_patch_gpu_model_runner_limits_named_parameters_on_patched_propose(
@@ -913,24 +948,22 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
     ):
         adaptive_draft_model_patch = _load_patch_module()
 
+        patch_gpu_model_runner_module = _get_module_member(
+            adaptive_draft_model_patch,
+            "_patch_gpu_model_runner_module",
+        )
         patched_propose_node = _get_nested_function_node(
-            adaptive_draft_model_patch._patch_gpu_model_runner_module,
+            patch_gpu_model_runner_module,
             "patched_propose_draft_token_ids",
         )
-        named_parameters = [
-            arg.arg
-            for arg in (
-                patched_propose_node.args.posonlyargs
-                + patched_propose_node.args.args
-                + patched_propose_node.args.kwonlyargs
-            )
-            if arg.arg != "self"
-        ]
+        named_parameters = _get_named_parameters(patched_propose_node)
 
         self.assertLessEqual(
             len(named_parameters),
             5,
-            "patched_propose_draft_token_ids should avoid a warning-level named parameter count across positional-only, standard, and keyword-only parameters",
+            "patched_propose_draft_token_ids should avoid a warning-level "
+            "named parameter count across positional-only, standard, and "
+            "keyword-only parameters",
         )
 
     def test_patch_spec_decode_eagle_uses_runner_draft_length_for_eagle3(self):
