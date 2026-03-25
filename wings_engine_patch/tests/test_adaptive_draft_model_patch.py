@@ -613,8 +613,8 @@ class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
             def _get_positions(num_tokens):
                 return torch.arange(num_tokens, dtype=torch.int32)
 
+            @staticmethod
             def propose_draft_token_ids(
-                self,
                 scheduler_output,
                 sampled_token_ids,
                 sampling_metadata,

@@ -986,10 +986,11 @@ def _patch_gpu_model_runner_module(module) -> None:
 
             num_scheduled_tokens = scheduler_output.total_num_scheduled_tokens
             if spec_config.disable_padded_drafter_batch:
-                assert isinstance(sampled_token_ids, list), (
-                    "sampled_token_ids should be a python list when"
-                    "padded-batch is disabled."
-                )
+                if not isinstance(sampled_token_ids, list):
+                    raise ValueError(
+                        "sampled_token_ids should be a python list when"
+                        "padded-batch is disabled."
+                    )
                 next_token_ids = self.drafter.prepare_next_token_ids_cpu(
                     sampled_token_ids,
                     self.requests,
@@ -997,10 +998,11 @@ def _patch_gpu_model_runner_module(module) -> None:
                     scheduler_output.num_scheduled_tokens,
                 )
             else:
-                assert isinstance(sampled_token_ids, torch.Tensor), (
-                    "sampled_token_ids should be a torch.Tensor when"
-                    "padded-batch is enabled."
-                )
+                if not isinstance(sampled_token_ids, torch.Tensor):
+                    raise ValueError(
+                        "sampled_token_ids should be a torch.Tensor when"
+                        "padded-batch is enabled."
+                    )
                 next_token_ids, valid_sampled_tokens_count = (
                     self.drafter.prepare_next_token_ids_padded(
                         common_attn_metadata,
@@ -1020,7 +1022,8 @@ def _patch_gpu_model_runner_module(module) -> None:
                 target_token_ids = self.input_ids.gpu[:num_scheduled_tokens]
                 target_positions = self._get_positions(num_scheduled_tokens)
                 if self.use_aux_hidden_state_outputs:
-                    assert aux_hidden_states is not None
+                    if aux_hidden_states is None:
+                        raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
                     target_hidden_states = torch.cat(
                         [h[:num_scheduled_tokens] for h in aux_hidden_states], dim=-1
                     )
@@ -1037,7 +1040,8 @@ def _patch_gpu_model_runner_module(module) -> None:
                     target_token_ids = self.input_ids.gpu[token_indices]
                     target_positions = self._get_positions(token_indices)
                     if self.use_aux_hidden_state_outputs:
-                        assert aux_hidden_states is not None
+                        if aux_hidden_states is None:
+                            raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
                         target_hidden_states = torch.cat(
                             [h[token_indices] for h in aux_hidden_states], dim=-1
                         )
@@ -1057,7 +1061,8 @@ def _patch_gpu_model_runner_module(module) -> None:
                     target_token_ids = self.input_ids.gpu[:total_num_tokens]
                     target_positions = self._get_positions(total_num_tokens)
                     if self.use_aux_hidden_state_outputs:
-                        assert aux_hidden_states is not None
+                        if aux_hidden_states is None:
+                            raise ValueError("aux_hidden_states cannot be None when use_aux_hidden_state_outputs is True")
                         target_hidden_states = torch.cat(
                             [h[:total_num_tokens] for h in aux_hidden_states], dim=-1
                         )
@@ -1181,7 +1186,8 @@ def _patch_spec_decode_eagle_module(module) -> None:
                 target_hidden_states = self.model.combine_hidden_states(
                     target_hidden_states
                 )
-                assert target_hidden_states.shape[-1] == self.hidden_size
+                if target_hidden_states.shape[-1] != self.hidden_size:
+                    raise ValueError(f"target_hidden_states.shape[-1] {target_hidden_states.shape[-1]} != self.hidden_size {self.hidden_size}")
 
         num_tokens, token_indices_to_sample, common_attn_metadata = (
             self.set_inputs_first_pass(
