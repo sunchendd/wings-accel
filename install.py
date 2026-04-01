@@ -278,7 +278,7 @@ def _install_arctic_inference(dry_run: bool = False) -> None:
         logger.info("[wings-accel] arctic-inference source package not found, skipping.")
         return
 
-    cmd = [sys.executable, "-m", "pip", "install", str(src), "--no-deps"]
+    cmd = [sys.executable, "-m", "pip", "install", str(src), "--no-deps", "--no-build-isolation"]
     if dry_run:
         logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
         return
