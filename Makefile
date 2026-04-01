@@ -38,7 +38,7 @@ list:
 
 ## clean      — 清理编译产物
 clean:
-	rm -rf build/output $(PKG_DIR)/dist $(PKG_DIR)/build $(PKG_DIR)/*.egg-info
+	rm -rf build/output build/tmp build/pkg $(PKG_DIR)/dist $(PKG_DIR)/build $(PKG_DIR)/*.egg-info
 
 ## dev-setup  — 安装开发依赖（pytest 等）
 dev-setup:

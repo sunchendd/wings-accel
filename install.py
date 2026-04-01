@@ -20,6 +20,14 @@ The --features JSON format:
 
 Example:
     python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+
+Deployment layout (all files at the same level as install.py):
+    install.py
+    supported_features.json
+    wings_engine_patch-*.whl
+    wrapt-*-linux_x86_64.whl
+    wrapt-*-linux_aarch64.whl
+    arctic-inference-*.tar.gz   (source package, installed offline)
 """
 
 import argparse
@@ -60,7 +68,9 @@ stderr_logger = _build_logger("stderr", "stderr")
 # Root-level supported_features.json is the CLI/MaaS-facing source of truth.
 _BASE_DIR = Path(__file__).resolve().parent
 _SUPPORTED_FEATURES_PATH = _BASE_DIR / "supported_features.json"
-_LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "build" / "output"
+# Deployment layout: all files (whl, source tarballs) sit next to install.py.
+# Source-tree fallback: build/output/ (used during local development).
+_LOCAL_WHEEL_DIR = _BASE_DIR
 
 # Map engine names to pyproject.toml [optional-dependencies] extras keys.
 _ENGINE_TO_EXTRAS = {
@@ -226,11 +236,15 @@ def validate_features(
 # ---------------------------------------------------------------------------
 
 def _find_local_whl() -> Path | None:
-    """Return the most recently built .whl in build/output/, if present."""
-    if _LOCAL_WHEEL_DIR.exists():
-        whls = list(_LOCAL_WHEEL_DIR.glob("*.whl"))
-        if whls:
-            return max(whls, key=lambda p: p.stat().st_mtime)
+    """Return the wings_engine_patch .whl in _BASE_DIR (deployment layout).
+
+    Falls back to build/output/ for local development (source-tree layout).
+    """
+    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR / "build" / "output"):
+        if search_dir.exists():
+            whls = [p for p in search_dir.glob("*.whl") if "wings_engine_patch" in p.name]
+            if whls:
+                return max(whls, key=lambda p: p.stat().st_mtime)
     return None
 
 
@@ -243,21 +257,69 @@ def _has_local_runtime_deps() -> bool:
     return True
 
 
+def _find_arctic_inference_source() -> Path | None:
+    """Return the arctic-inference source tarball sitting next to install.py."""
+    for pattern in (
+        "arctic_inference-*.tar.gz",
+        "arctic-inference-*.tar.gz",
+        "arctic_inference-*.zip",
+        "arctic-inference-*.zip",
+    ):
+        matches = list(_BASE_DIR.glob(pattern))
+        if matches:
+            return max(matches, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def _install_arctic_inference(dry_run: bool = False) -> None:
+    """Install arctic-inference from the local source tarball (offline)."""
+    src = _find_arctic_inference_source()
+    if src is None:
+        logger.info("[wings-accel] arctic-inference source package not found, skipping.")
+        return
+
+    cmd = [sys.executable, "-m", "pip", "install", str(src), "--no-deps"]
+    if dry_run:
+        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
+        return
+
+    logger.info(f"[wings-accel] Installing arctic-inference from {src.name} ...")
+    try:
+        subprocess.check_call(cmd)
+        logger.info("[wings-accel] ✅ arctic-inference installed.")
+    except subprocess.CalledProcessError as e:
+        stderr_logger.error(
+            f"[wings-accel] Error: arctic-inference install failed (exit {e.returncode})."
+        )
+        raise
+
+
 def install_engine(
     engine_name: str,
     version: str,
     features: list,
     dry_run: bool = False,
 ) -> None:
-    """Run pip install for the given engine's extras group."""
+    """Run pip install for the given engine's extras group.
+
+    Supports fully offline installation:
+      - When a local .whl is found, uses --find-links + --no-index so pip
+        resolves ALL dependencies (e.g. wrapt) from the same local directory.
+      - Falls back to --no-deps when all runtime deps are already importable.
+      - Falls back to PyPI when no local wheel is available.
+    """
     extras = _ENGINE_TO_EXTRAS.get(engine_name, engine_name)
     local_whl = _find_local_whl()
 
     if local_whl:
         pkg = f"{local_whl}[{extras}]"
-        cmd = [sys.executable, "-m", "pip", "install", pkg, "--force-reinstall"]
+        local_dir = str(local_whl.parent)
         if _has_local_runtime_deps():
-            cmd.append("--no-deps")
+            cmd = [sys.executable, "-m", "pip", "install", pkg,
+                   "--force-reinstall", "--no-deps"]
+        else:
+            cmd = [sys.executable, "-m", "pip", "install", pkg,
+                   "--force-reinstall", "--no-index", "--find-links", local_dir]
     else:
         pkg = f"wings_engine_patch[{extras}]"
         cmd = [sys.executable, "-m", "pip", "install", pkg]
@@ -271,8 +333,23 @@ def install_engine(
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
-        stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
-        raise
+        if local_whl and "--no-index" in cmd:
+            stderr_logger.warning(
+                "[wings-accel] Offline install failed (missing dependency wheels?), "
+                "retrying with --no-deps ..."
+            )
+            cmd_fallback = [sys.executable, "-m", "pip", "install", pkg,
+                            "--force-reinstall", "--no-deps"]
+            try:
+                subprocess.check_call(cmd_fallback)
+            except subprocess.CalledProcessError as e2:
+                stderr_logger.error(
+                    f"[wings-accel] Error: pip install failed (exit {e2.returncode})."
+                )
+                raise
+        else:
+            stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
+            raise
 
     _print_env_hint(engine_name, version, features)
 
@@ -522,6 +599,9 @@ Examples:
             if not ok:
                 exit_code = 1
         else:
+            # Install arctic-inference from local source if present (vllm container
+            # does not ship arctic-inference by default).
+            _install_arctic_inference(dry_run=args.dry_run)
             install_engine(
                 engine_name,
                 resolved_version,
