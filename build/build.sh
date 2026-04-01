@@ -56,11 +56,13 @@ done
 # ---------------------------------------------------------------------------
 echo "[wings-accel] ── Copying arctic-inference source package..."
 ARCTIC_DIR="${ROOT_DIR}/arctic-inference"
-if ls "${ARCTIC_DIR}"/arctic_inference-*.tar.gz "${ARCTIC_DIR}"/arctic-inference-*.tar.gz 2>/dev/null | head -1 | grep -q .; then
-    cp "${ARCTIC_DIR}"/arctic*.tar.gz "${PKG_DIR}/"
+ARCTIC_SRC="$(find "${ARCTIC_DIR}" -maxdepth 1 -name "arctic*.tar.gz" -o -name "arctic*.zip" 2>/dev/null | sort | tail -1)"
+if [ -n "${ARCTIC_SRC}" ]; then
+    cp "${ARCTIC_SRC}" "${PKG_DIR}/"
+    echo "[wings-accel]    Included: $(basename "${ARCTIC_SRC}")"
 else
     echo "[wings-accel] Warning: no arctic-inference tarball found in ${ARCTIC_DIR}/"
-    echo "[wings-accel]   Run: python3 -c \"import urllib.request,json; resp=urllib.request.urlopen('https://pypi.org/pypi/arctic-inference/json'); d=json.load(resp); url=[u['url'] for u in d['urls'] if u['packagetype']=='sdist'][0]; urllib.request.urlretrieve(url, 'arctic-inference/'+url.split('/')[-1])\""
+    echo "[wings-accel]   Place arctic_inference-*.tar.gz there before building."
 fi
 
 # ---------------------------------------------------------------------------

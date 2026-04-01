@@ -548,6 +548,11 @@ Examples:
     engines_spec = data["engines"]
     exit_code = 0
 
+    # Install arctic-inference once (before engine loop) when not in check mode.
+    # vllm containers do not ship arctic-inference by default.
+    if not args.check and args.features:
+        _install_arctic_inference(dry_run=args.dry_run)
+
     for engine_name, config in features_config.items():
         if not isinstance(config, dict):
             stderr_logger.error(
@@ -599,9 +604,6 @@ Examples:
             if not ok:
                 exit_code = 1
         else:
-            # Install arctic-inference from local source if present (vllm container
-            # does not ship arctic-inference by default).
-            _install_arctic_inference(dry_run=args.dry_run)
             install_engine(
                 engine_name,
                 resolved_version,
