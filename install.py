@@ -269,8 +269,35 @@ def _find_arctic_inference_whl() -> Path | None:
     return None
 
 
+def _is_arctic_inference_installed() -> bool:
+    """Return True if arctic-inference is already importable in the current environment."""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("arctic_inference") is not None
+    except Exception:
+        return False
+
+
 def _install_arctic_inference(dry_run: bool = False) -> None:
-    """Install arctic-inference from the local pre-built wheel (offline, no compilation)."""
+    """Install arctic-inference from the local pre-built wheel (offline, no compilation).
+
+    Skipped when:
+      - arctic-inference is already installed (e.g. vllm-ascend containers ship it), or
+      - the host architecture is not x86_64 (the pre-built wheel only targets x86_64).
+    """
+    import platform
+
+    arch = platform.machine()
+    if arch != "x86_64":
+        logger.info(
+            f"[wings-accel] Skipping arctic-inference install: architecture is {arch} (x86_64 only)."
+        )
+        return
+
+    if _is_arctic_inference_installed():
+        logger.info("[wings-accel] arctic-inference already installed, skipping.")
+        return
+
     whl = _find_arctic_inference_whl()
     if whl is None:
         logger.info("[wings-accel] arctic-inference wheel not found, skipping.")
@@ -547,7 +574,7 @@ Examples:
     exit_code = 0
 
     # Install arctic-inference once (before engine loop) when not in check mode.
-    # vllm containers do not ship arctic-inference by default.
+    # Skipped automatically when already installed (vllm-ascend ships it) or on non-x86_64.
     if not args.check and args.features:
         _install_arctic_inference(dry_run=args.dry_run)
 
