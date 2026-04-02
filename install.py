@@ -27,7 +27,7 @@ Deployment layout (all files at the same level as install.py):
     wings_engine_patch-*.whl
     wrapt-*-linux_x86_64.whl
     wrapt-*-linux_aarch64.whl
-    arctic-inference-*.tar.gz   (source package, installed offline)
+    arctic_inference-*.whl      (pre-built wheel, installed offline)
 """
 
 import argparse
@@ -257,13 +257,11 @@ def _has_local_runtime_deps() -> bool:
     return True
 
 
-def _find_arctic_inference_source() -> Path | None:
-    """Return the arctic-inference source tarball sitting next to install.py."""
+def _find_arctic_inference_whl() -> Path | None:
+    """Return the arctic-inference pre-built wheel sitting next to install.py."""
     for pattern in (
-        "arctic_inference-*.tar.gz",
-        "arctic-inference-*.tar.gz",
-        "arctic_inference-*.zip",
-        "arctic-inference-*.zip",
+        "arctic_inference-*.whl",
+        "arctic-inference-*.whl",
     ):
         matches = list(_BASE_DIR.glob(pattern))
         if matches:
@@ -272,18 +270,18 @@ def _find_arctic_inference_source() -> Path | None:
 
 
 def _install_arctic_inference(dry_run: bool = False) -> None:
-    """Install arctic-inference from the local source tarball (offline)."""
-    src = _find_arctic_inference_source()
-    if src is None:
-        logger.info("[wings-accel] arctic-inference source package not found, skipping.")
+    """Install arctic-inference from the local pre-built wheel (offline, no compilation)."""
+    whl = _find_arctic_inference_whl()
+    if whl is None:
+        logger.info("[wings-accel] arctic-inference wheel not found, skipping.")
         return
 
-    cmd = [sys.executable, "-m", "pip", "install", str(src), "--no-deps", "--no-build-isolation"]
+    cmd = [sys.executable, "-m", "pip", "install", str(whl), "--no-deps"]
     if dry_run:
         logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
         return
 
-    logger.info(f"[wings-accel] Installing arctic-inference from {src.name} ...")
+    logger.info(f"[wings-accel] Installing arctic-inference from {whl.name} ...")
     try:
         subprocess.check_call(cmd)
         logger.info("[wings-accel] ✅ arctic-inference installed.")

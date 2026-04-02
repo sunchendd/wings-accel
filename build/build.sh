@@ -9,7 +9,7 @@
 #   wings_engine_patch-*.whl
 #   wrapt-*-linux_x86_64.whl
 #   wrapt-*-linux_aarch64.whl
-#   arctic_inference-*.tar.gz   (source package)
+#   arctic_inference-*.whl      (pre-built wheel, placed in arctic-inference/ before build)
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,18 +52,10 @@ for PLATFORM in linux_x86_64 linux_aarch64; do
 done
 
 # ---------------------------------------------------------------------------
-# 3. Copy arctic-inference source package from local archive
+# 3. Build arctic-inference wheel and include in package
 # ---------------------------------------------------------------------------
-echo "[wings-accel] ── Copying arctic-inference source package..."
-ARCTIC_DIR="${ROOT_DIR}/arctic-inference"
-ARCTIC_SRC="$(find "${ARCTIC_DIR}" -maxdepth 1 -name "arctic*.tar.gz" -o -name "arctic*.zip" 2>/dev/null | sort | tail -1)"
-if [ -n "${ARCTIC_SRC}" ]; then
-    cp "${ARCTIC_SRC}" "${PKG_DIR}/"
-    echo "[wings-accel]    Included: $(basename "${ARCTIC_SRC}")"
-else
-    echo "[wings-accel] Warning: no arctic-inference tarball found in ${ARCTIC_DIR}/"
-    echo "[wings-accel]   Place arctic_inference-*.tar.gz there before building."
-fi
+echo "[wings-accel] ── Building arctic-inference wheel..."
+bash "${ROOT_DIR}/arctic-inference/build.sh" "${PKG_DIR}"
 
 # ---------------------------------------------------------------------------
 # 4. Copy install artifacts
