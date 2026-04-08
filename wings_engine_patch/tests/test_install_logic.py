@@ -15,6 +15,7 @@ import builtins
 import importlib.util
 from pathlib import Path
 from unittest.mock import patch
+import pytest
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
@@ -133,6 +134,7 @@ class TestResolveVersion(unittest.TestCase):
     def test_old_version_raises(self):
         with self.assertRaises(ValueError) as ctx:
             resolve_version("myengine", "0.9.0", self._spec())
+        self.assertIn("older than the minimum supported patched version", str(ctx.exception))
         self.assertIn("Historical versions are not supported", str(ctx.exception))
 
     def test_unvalidated_gap_version_raises(self):
@@ -248,6 +250,25 @@ class TestCurrentVllmVersionPolicy(unittest.TestCase):
         self.assertEqual(ver, "0.17.0")
         self.assertTrue(spec["is_default"])
 
+    def test_manifest_historical_version_rejects_older_vllm_release(self):
+        data = load_supported_features()
+        with self.assertRaises(ValueError) as ctx:
+            resolve_version("vllm", "0.12.0", data["engines"]["vllm"])
+        self.assertIn("Historical versions are not supported", str(ctx.exception))
+
+
+def test_get_packaging_version_types_requires_runtime_deps():
+    original_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name in {"packaging", "packaging.version"}:
+            raise ImportError("packaging unavailable")
+        return original_import(name, *args, **kwargs)
+
+    with patch("builtins.__import__", side_effect=fake_import):
+        with pytest.raises(RuntimeError, match=r"Run `install.py --install-runtime-deps` first"):
+            install_module._get_packaging_version_types()  # pylint: disable=protected-access
+
 
 class TestFindLocalWheel(unittest.TestCase):
 
@@ -290,18 +311,19 @@ class TestInstallEngine(unittest.TestCase):
         wheel_path = Path("/tmp/wings_engine_patch-1.0.0-py3-none-any.whl")
 
         with patch.object(install_module, "_find_local_whl", return_value=wheel_path):
-            with patch.object(install_module, "_has_local_runtime_deps", return_value=True):
-                orig = sys.stdout
-                sys.stdout = captured
-                try:
-                    install_module.install_engine(
-                        "vllm",
-                        "0.17.0",
-                        ["ears"],
-                        dry_run=True,
-                    )
-                finally:
-                    sys.stdout = orig
+            with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=wheel_path):
+                with patch.object(install_module, "_has_local_runtime_deps", return_value=True):
+                    orig = sys.stdout
+                    sys.stdout = captured
+                    try:
+                        install_module.install_engine(
+                            "vllm",
+                            "0.17.0",
+                            ["ears"],
+                            dry_run=True,
+                        )
+                    finally:
+                        sys.stdout = orig
 
         output = captured.getvalue()
         self.assertIn("--no-deps", output)
@@ -312,18 +334,19 @@ class TestInstallEngine(unittest.TestCase):
         wheel_path = Path("/tmp/wings_engine_patch-1.0.0-py3-none-any.whl")
 
         with patch.object(install_module, "_find_local_whl", return_value=wheel_path):
-            with patch.object(install_module, "_has_local_runtime_deps", return_value=False):
-                orig = sys.stdout
-                sys.stdout = captured
-                try:
-                    install_module.install_engine(
-                        "vllm",
-                        "0.17.0",
-                        ["ears"],
-                        dry_run=True,
-                    )
-                finally:
-                    sys.stdout = orig
+            with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=wheel_path):
+                with patch.object(install_module, "_has_local_runtime_deps", return_value=False):
+                    orig = sys.stdout
+                    sys.stdout = captured
+                    try:
+                        install_module.install_engine(
+                            "vllm",
+                            "0.17.0",
+                            ["ears"],
+                            dry_run=True,
+                        )
+                    finally:
+                        sys.stdout = orig
 
         output = captured.getvalue()
         self.assertIn("--no-index", output)
