@@ -34,6 +34,7 @@ Deployment layout (all files at the same level as install.py):
 from __future__ import annotations
 
 import argparse
+import builtins
 import functools
 import importlib.util
 import json
@@ -43,6 +44,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
 
 
 class _StreamProxy:
@@ -81,6 +83,7 @@ _LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "bui
 # Map engine names to pyproject.toml [optional-dependencies] extras keys.
 _ENGINE_TO_EXTRAS = {
     "vllm": "vllm",
+    "vllm_ascend": "vllm",
 }
 
 
@@ -324,28 +327,51 @@ def parse_requested_install(raw_features_json: str, manifest: dict) -> tuple[str
 # Installation
 # ---------------------------------------------------------------------------
 
-def _find_local_whl() -> Path | None:
-    """Return the wings_engine_patch .whl in _BASE_DIR (deployment layout).
+def _iter_local_wheel_dirs() -> list[Path]:
+    search_dirs = []
+    seen_dirs = set()
 
-    Falls back to build/output/ for local development (source-tree layout).
-    """
-    for search_dir in (_BASE_DIR, _LOCAL_WHEEL_DIR):
-        if search_dir.exists():
-            whls = [p for p in search_dir.glob("*.whl") if "wings_engine_patch" in p.name]
-            if whls:
-                return max(whls, key=lambda p: p.stat().st_mtime)
-    return None
-
-
-def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
     for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
+        normalized_dir = str(search_dir.resolve(strict=False))
+        if normalized_dir in seen_dirs:
+            continue
+        seen_dirs.add(normalized_dir)
+        search_dirs.append(search_dir)
+
+    return search_dirs
+
+
+def _find_latest_wheel(
+    *patterns: str,
+    predicate: Callable[[Path], bool] | None = None,
+) -> Path | None:
+    for search_dir in _iter_local_wheel_dirs():
         if not search_dir.exists():
             continue
 
-        matches = list(search_dir.glob(f"{prefix}-*.whl"))
+        matches = []
+        for pattern in patterns:
+            matches.extend(search_dir.glob(pattern))
+
+        if predicate is not None:
+            matches = [match for match in matches if predicate(match)]
+
         if matches:
-            return max(matches, key=lambda p: p.stat().st_mtime)
+            return max(matches, key=lambda path: (path.stat().st_mtime, path.name))
+
     return None
+
+
+def _find_local_whl() -> Path | None:
+    """Return the newest local wings_engine_patch wheel in deterministic search order."""
+    return _find_latest_wheel(
+        "wings_engine_patch-*.whl",
+        predicate=lambda path: "wings_engine_patch" in path.name,
+    )
+
+
+def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
+    return _find_latest_wheel(f"{prefix}-*.whl")
 
 
 def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:
@@ -383,17 +409,10 @@ def _install_local_feature_wheels(features: list[str], dry_run: bool = False) ->
 
 
 def _find_arctic_inference_whl() -> Path | None:
-    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
-        if not search_dir.exists():
-            continue
-        for pattern in (
-            "arctic_inference-*.whl",
-            "arctic-inference-*.whl",
-        ):
-            matches = list(search_dir.glob(pattern))
-            if matches:
-                return max(matches, key=lambda p: p.stat().st_mtime)
-    return None
+    return _find_latest_wheel(
+        "arctic_inference-*.whl",
+        "arctic-inference-*.whl",
+    )
 
 
 def _is_arctic_inference_installed() -> bool:
@@ -401,11 +420,20 @@ def _is_arctic_inference_installed() -> bool:
 
 
 def _is_module_available(module_name: str) -> bool:
-    return importlib.util.find_spec(module_name) is not None
+    try:
+        builtins.__import__(module_name)
+        return True
+    except Exception:
+        return False
 
 
 def _has_local_runtime_deps() -> bool:
-    return _is_module_available("wrapt") and _is_module_available("packaging")
+    try:
+        builtins.__import__("wrapt")
+        builtins.__import__("packaging")
+        return True
+    except Exception:
+        return False
 
 
 def _install_local_dependency(
@@ -416,33 +444,38 @@ def _install_local_dependency(
     *,
     no_deps: bool = False,
     missing_ok: bool = False,
+    allow_online_fallback: bool = False,
 ) -> None:
     if _is_module_available(module_name):
         logger.info(f"[wings-accel] {package_name} already installed, skipping.")
         return
 
     if wheel_path is None:
-        message = (
-            f"[wings-accel] {package_name} wheel not found in {_LOCAL_WHEEL_DIR} or {_BASE_DIR}, "
-            "skipping."
-        )
+        message = f"[wings-accel] {package_name} wheel not found in {_LOCAL_WHEEL_DIR} or {_BASE_DIR}."
         if dry_run:
             logger.info(f"[dry-run] {message}")
             return
-        if missing_ok:
-            logger.info(message)
+        if allow_online_fallback:
+            logger.warning(f"{message} Falling back to pip index install.")
+            cmd = [sys.executable, "-m", "pip", "install", package_name]
+        elif missing_ok:
+            logger.info(f"{message} Skipping.")
             return
-        raise FileNotFoundError(message)
-
-    cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
-    if no_deps:
-        cmd.append("--no-deps")
+        else:
+            raise FileNotFoundError(message)
+    else:
+        cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
+        if no_deps:
+            cmd.append("--no-deps")
 
     if dry_run:
         logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
         return
 
-    logger.info(f"[wings-accel] Installing {package_name} from {wheel_path.name} ...")
+    if wheel_path is None:
+        logger.info(f"[wings-accel] Installing {package_name} from pip index ...")
+    else:
+        logger.info(f"[wings-accel] Installing {package_name} from {wheel_path.name} ...")
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as exc:
@@ -452,7 +485,18 @@ def _install_local_dependency(
         raise
 
 
-def install_runtime_dependencies(dry_run: bool = False) -> None:
+def _requires_arctic_inference(engine_name: str | None, features: list[str] | None) -> bool:
+    if engine_name is None:
+        return True
+
+    return "ears" in set(features or [])
+
+
+def install_runtime_dependencies(
+    engine_name: str | None = None,
+    features: list[str] | None = None,
+    dry_run: bool = False,
+) -> None:
     runtime_dependencies = (
         ("wrapt", "wrapt", _find_local_wheel_by_prefix("wrapt"), False),
         ("packaging", "packaging", _find_local_wheel_by_prefix("packaging"), False),
@@ -465,9 +509,11 @@ def install_runtime_dependencies(dry_run: bool = False) -> None:
             wheel_path,
             dry_run=dry_run,
             missing_ok=missing_ok,
+            allow_online_fallback=True,
         )
 
-    _install_arctic_inference(dry_run=dry_run)
+    if _requires_arctic_inference(engine_name, features):
+        _install_arctic_inference(dry_run=dry_run)
 
 
 def _install_arctic_inference(dry_run: bool = False) -> None:
@@ -490,7 +536,7 @@ def _install_arctic_inference(dry_run: bool = False) -> None:
         _find_arctic_inference_whl(),
         dry_run=dry_run,
         no_deps=True,
-        missing_ok=True,
+        allow_online_fallback=True,
     )
 
 
@@ -750,7 +796,11 @@ Examples:
         sys.exit(1)
 
     if not args.check:
-        install_runtime_dependencies(dry_run=args.dry_run)
+        install_runtime_dependencies(
+            engine_name,
+            requested_features,
+            dry_run=args.dry_run,
+        )
 
     if args.check:
         ok = check_installed(engine_name, resolved_version, requested_features)

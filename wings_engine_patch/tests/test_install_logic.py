@@ -406,6 +406,44 @@ class TestCurrentVllmVersionPolicy(unittest.TestCase):
 
 class TestFindLocalWheel(unittest.TestCase):
 
+    def test_find_local_whl_prefers_build_output_over_base_dir(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir) / "repo-root"
+            local_dir = base_dir / "build" / "output"
+            base_dir.mkdir(parents=True)
+            local_dir.mkdir(parents=True)
+
+            base_wheel = base_dir / "wings_engine_patch-1.0.0-py3-none-any.whl"
+            local_wheel = local_dir / "wings_engine_patch-1.0.1-py3-none-any.whl"
+            base_wheel.write_text("base", encoding="utf-8")
+            local_wheel.write_text("local", encoding="utf-8")
+            os.utime(local_wheel, (1, 1))
+            os.utime(base_wheel, (2, 2))
+
+            with patch.object(install_module, "_BASE_DIR", base_dir):
+                with patch.object(install_module, "_LOCAL_WHEEL_DIR", local_dir):
+                    found = install_module._find_local_whl()  # pylint: disable=protected-access
+
+            self.assertEqual(found, local_wheel)
+
+    def test_find_local_whl_breaks_equal_mtime_ties_deterministically(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wheel_dir = Path(tmpdir) / "build" / "output"
+            wheel_dir.mkdir(parents=True)
+
+            first = wheel_dir / "wings_engine_patch-1.0.0-py3-none-any.whl"
+            second = wheel_dir / "wings_engine_patch-1.0.1-py3-none-any.whl"
+            first.write_text("first", encoding="utf-8")
+            second.write_text("second", encoding="utf-8")
+            os.utime(first, (5, 5))
+            os.utime(second, (5, 5))
+
+            with patch.object(install_module, "_LOCAL_WHEEL_DIR", wheel_dir):
+                with patch.object(install_module, "_BASE_DIR", wheel_dir.parent.parent):
+                    found = install_module._find_local_whl()  # pylint: disable=protected-access
+
+            self.assertEqual(found, second)
+
     def test_find_local_whl_reads_root_build_output(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             wheel_dir = Path(tmpdir) / "build" / "output"
@@ -439,6 +477,26 @@ class TestFindLocalWheel(unittest.TestCase):
 
 
 class TestInstallEngine(unittest.TestCase):
+
+    def test_install_engine_fallback_failure_stays_visible(self):
+        wheel_path = Path(PROJECT_ROOT) / "wings_engine_patch-1.0.0-py3-none-any.whl"
+
+        with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=wheel_path):
+            with patch.object(install_module, "_find_local_whl", return_value=None):
+                with patch.object(install_module, "_has_local_runtime_deps", return_value=False):
+                    with patch.object(install_module.subprocess, "check_call") as check_call:
+                        check_call.side_effect = [
+                            install_module.subprocess.CalledProcessError(1, ["pip"]),
+                            install_module.subprocess.CalledProcessError(2, ["pip"]),
+                        ]
+
+                        with self.assertRaises(install_module.subprocess.CalledProcessError) as ctx:
+                            install_module.install_engine("vllm", "0.17.0", ["ears"])
+
+        self.assertEqual(ctx.exception.returncode, 2)
+        self.assertEqual(check_call.call_count, 2)
+        self.assertIn("--no-index", check_call.call_args_list[0].args[0])
+        self.assertIn("--no-deps", check_call.call_args_list[1].args[0])
 
     def test_local_wheel_dry_run_skips_deps_when_wrapt_already_installed(self):
         captured = io.StringIO()
@@ -494,6 +552,17 @@ class TestLocalRuntimeDeps(unittest.TestCase):
         def fake_import(name, *args, **kwargs):
             if name == "packaging":
                 raise ImportError("packaging unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            self.assertFalse(install_module._has_local_runtime_deps())  # pylint: disable=protected-access
+
+    def test_has_local_runtime_deps_handles_broken_imports(self):
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "packaging":
+                raise RuntimeError("packaging broken")
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=fake_import):
@@ -631,7 +700,7 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
             with mock.patch.object(
                 install_module,
                 "install_runtime_dependencies",
-                side_effect=lambda dry_run=False: events.append(("deps", dry_run)),
+                side_effect=lambda *args, dry_run=False, **kwargs: events.append(("deps", dry_run)),
                 create=True,
             ):
                 with mock.patch.object(
@@ -654,7 +723,7 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
             with mock.patch.object(
                 install_module,
                 "install_runtime_dependencies",
-                side_effect=lambda dry_run=False: calls.append(("deps", dry_run)),
+                side_effect=lambda *args, dry_run=False, **kwargs: calls.append(("deps", dry_run)),
                 create=True,
             ):
                 with mock.patch.object(install_module, "install_engine") as install_engine:
@@ -663,6 +732,112 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
 
         install_engine.assert_not_called()
         self.assertEqual(calls, [("deps", True)])
+
+    def test_runtime_dependency_fallback_uses_index_when_local_wheel_missing(self):
+        commands = []
+
+        with patch.object(install_module, "_is_module_available", return_value=False):
+            with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=None):
+                with patch.object(install_module, "_find_arctic_inference_whl", return_value=None):
+                    with patch.object(install_module.platform, "machine", return_value="x86_64"):
+                        with patch.object(
+                            install_module.subprocess,
+                            "check_call",
+                            side_effect=lambda cmd: commands.append(cmd),
+                        ):
+                            install_module.install_runtime_dependencies(
+                                "vllm",
+                                ["ears"],
+                                dry_run=False,
+                            )
+
+        self.assertEqual(
+            commands,
+            [
+                [sys.executable, "-m", "pip", "install", "wrapt"],
+                [sys.executable, "-m", "pip", "install", "packaging"],
+                [sys.executable, "-m", "pip", "install", "arctic-inference"],
+            ],
+        )
+
+    def test_runtime_dependency_fallback_failure_raises(self):
+        with patch.object(install_module, "_is_module_available", return_value=False):
+            with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=None):
+                with patch.object(install_module, "_find_arctic_inference_whl", return_value=None):
+                    with patch.object(
+                        install_module.subprocess,
+                        "check_call",
+                        side_effect=install_module.subprocess.CalledProcessError(9, ["pip"]),
+                    ):
+                        with self.assertRaises(install_module.subprocess.CalledProcessError):
+                            install_module.install_runtime_dependencies(
+                                "vllm",
+                                ["ears"],
+                                dry_run=False,
+                            )
+
+    def test_runtime_dependency_reinstalls_broken_module(self):
+        original_import = builtins.__import__
+        commands = []
+
+        def fake_import(name, *args, **kwargs):
+            if name == "wrapt":
+                raise RuntimeError("wrapt broken")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=None):
+                with patch.object(install_module.subprocess, "check_call", side_effect=lambda cmd: commands.append(cmd)):
+                    install_module.install_runtime_dependencies(
+                        "vllm_ascend",
+                        ["parallel_spec_decode"],
+                        dry_run=False,
+                    )
+
+        self.assertEqual(
+            commands,
+            [
+                [sys.executable, "-m", "pip", "install", "wrapt"],
+            ],
+        )
+
+    def test_runtime_dependency_skips_arctic_when_requires_arctic_false(self):
+        with patch.object(install_module, "_install_local_dependency"):
+            with patch.object(install_module, "_install_arctic_inference") as install_arctic:
+                install_module.install_runtime_dependencies(
+                    "vllm_ascend",
+                    ["parallel_spec_decode"],
+                    dry_run=True,
+                )
+
+        install_arctic.assert_not_called()
+
+    def test_runtime_dependency_installs_arctic_when_requires_arctic_true(self):
+        with patch.object(install_module, "_install_local_dependency"):
+            with patch.object(install_module, "_install_arctic_inference") as install_arctic:
+                install_module.install_runtime_dependencies(
+                    "vllm_ascend",
+                    ["ears"],
+                    dry_run=True,
+                )
+
+        install_arctic.assert_called_once_with(dry_run=True)
+
+    def test_requires_arctic_false_for_parallel_spec_decode_only(self):
+        self.assertFalse(
+            install_module._requires_arctic_inference(  # pylint: disable=protected-access
+                "vllm_ascend",
+                ["parallel_spec_decode"],
+            )
+        )
+
+    def test_requires_arctic_true_for_ears(self):
+        self.assertTrue(
+            install_module._requires_arctic_inference(  # pylint: disable=protected-access
+                "vllm_ascend",
+                ["parallel_spec_decode", "ears"],
+            )
+        )
 
 
 class TestInstallCliValidation(unittest.TestCase):
@@ -778,6 +953,28 @@ class TestInstallCliValidation(unittest.TestCase):
         check_call.assert_not_called()
         self.assertIn("unknown_engine", captured.getvalue())
 
+    def test_check_mode_does_not_invoke_pip(self):
+        features_json = json.dumps({
+            "vllm": {
+                "version": "0.17.0",
+                "features": ["ears"],
+            }
+        })
+
+        with patch("sys.argv", ["install.py", "--check", "--features", features_json]):
+            with patch.object(install_module, "check_installed", return_value=True) as check_installed:
+                with patch.object(install_module, "install_runtime_dependencies") as install_runtime_dependencies:
+                    with patch.object(install_module, "install_engine") as install_engine:
+                        with patch.object(install_module.subprocess, "check_call") as check_call:
+                            with self.assertRaises(SystemExit) as ctx:
+                                install_main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        check_installed.assert_called_once_with("vllm", "0.17.0", ["ears"])
+        install_runtime_dependencies.assert_not_called()
+        install_engine.assert_not_called()
+        check_call.assert_not_called()
+
     def test_public_env_hint_contains_vllm_ascend_and_parallel_spec_decode(self):
         features_json = json.dumps({
             "vllm_ascend": {
@@ -798,6 +995,21 @@ class TestInstallCliValidation(unittest.TestCase):
         self.assertIn("WINGS_ENGINE_PATCH_OPTIONS", output)
         self.assertIn("vllm_ascend", output)
         self.assertIn("parallel_spec_decode", output)
+
+    def test_vllm_ascend_uses_vllm_extra(self):
+        captured = io.StringIO()
+
+        with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=None):
+            with patch.object(install_module, "_find_local_whl", return_value=None):
+                with patch("sys.stdout", captured):
+                    install_module.install_engine(
+                        "vllm_ascend",
+                        "0.17.0",
+                        ["parallel_spec_decode"],
+                        dry_run=True,
+                    )
+
+        self.assertIn("wings_engine_patch[vllm]", captured.getvalue())
 
     def test_future_version_dry_run_warns_and_uses_fallback_version(self):
         features_json = json.dumps({
