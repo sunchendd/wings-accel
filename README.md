@@ -10,11 +10,11 @@ make build         # 产出 build/output/ 下的完整交付件
 
 # 2. 安装到推理环境
 cd build/output
-python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --install-runtime-deps
+python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
 
 # 3. 运行时启用
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.17.0","features":["ears"]}}'
 python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
@@ -42,10 +42,10 @@ cd build/output
 python3 install.py --install-runtime-deps
 
 # 3. 安装补丁包（按上游 JSON 传参方式选择要启用的补丁）
-python3 install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
 
 # 4. 运行前设置环境变量
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.17.0","features":["ears"]}}'
 
 # 5. 启动 vLLM
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
@@ -54,27 +54,34 @@ python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
 如果只想先检查安装命令，不实际执行，可以用：
 
 ```bash
-python3 install.py --dry-run --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --dry-run --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
+```
+
+开发者校验已安装补丁时，可以用：
+
+```bash
+python3 install.py --check --features '{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
 ```
 
 ## 支持的引擎与特性
 
 ```bash
-python install.py --list
+python3 install.py --list
 ```
 
-| 引擎 | 版本 | 特性 | 说明 |
-|---|---|---|---|
-| vllm | 0.17.0 | ears | 为 Ascend / NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
+| 引擎 | 版本 | 特性 |
+|---|---|---|
+| vllm | 0.17.0 | ears |
+| vllm_ascend | 0.17.0 | parallel_spec_decode, ears |
 
 ## CLI 参考
 
 ```
-python install.py --features '<JSON>'            # 安装并打印 env 提示
-python install.py --features '<JSON>' --dry-run  # 校验但不执行 pip install
-python install.py --features '<JSON>' --check    # 开发者自验证模式
-python install.py --install-runtime-deps         # 仅安装 wrapt/packaging/arctic-inference
-python install.py --list                         # 列出所有支持的引擎/特性
+python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
+python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}' --dry-run
+python3 install.py --check --features '{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
+python3 install.py --install-runtime-deps
+python3 install.py --list
 ```
 
 ## Makefile 目标

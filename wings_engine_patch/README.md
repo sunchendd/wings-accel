@@ -26,8 +26,8 @@ make install     # build + pip install into current environment
 **Or use the install CLI directly:**
 
 ```bash
-python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --install-runtime-deps
+python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
 ```
 
 **Manual (advanced):**
@@ -55,20 +55,28 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `ears` patch for `vllm` version `0.17.0` on Ascend or NVIDIA:
+To enable the `ears` patch for `vllm` version `0.17.0` on NVIDIA:
 
 ```bash
-export WINGS_ENGINE_PATCH_OPTIONS='{
-    "vllm": {
-        "version": "0.17.0",
-        "features": ["ears"]
-    }
-}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.17.0","features":["ears"]}}'
 
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
 > **Note**: If the configured version matches the installed engine version, patches are applied. If there is a mismatch, the system may attempt to fall back to a default version configuration if one is defined in the registry.
+
+### Developer Validation
+
+```bash
+python3 install.py --check --features '{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
+```
+
+## Supported Engines and Features
+
+| Engine | Version | Features |
+|---|---|---|
+| vllm | 0.17.0 | ears |
+| vllm_ascend | 0.17.0 | parallel_spec_decode, ears |
 
 ## Development
 
@@ -121,4 +129,4 @@ wings_engine_patch/
 
 ### Feature Propagation and Patch Deduplication
 
-The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In this repository, `ears` is the public runtime feature shipped for vLLM `0.17.0`.
+The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In this repository, the public runtime contract is `vllm@0.17.0 -> ears` and `vllm_ascend@0.17.0 -> parallel_spec_decode, ears`.

@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "updated_at": "2026-04-08",
-  "description": "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
+  "description": "Registry of supported inference engines and their patch capabilities provided by wings-engine-patch.",
   "engines": {
     "vllm": {
       "description": "Standard vLLM Inference Engine",
@@ -10,7 +10,23 @@
           "is_default": true,
           "features": {
             "ears": {
-              "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on Ascend and NVIDIA vLLM 0.17.0"
+              "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on NVIDIA vLLM 0.17.0"
+            }
+          }
+        }
+      }
+    },
+    "vllm_ascend": {
+      "description": "Ascend vLLM Inference Engine",
+      "versions": {
+        "0.17.0": {
+          "is_default": true,
+          "features": {
+            "parallel_spec_decode": {
+              "description": "Fix AscendDraftModelProposer position OOB crash when draft model max_position_embeddings < target model max_model_len (e.g. Qwen3-0.6B + Qwen3-8B)"
+            },
+            "ears": {
+              "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on vllm-ascend 0.17.0"
             }
           }
         }

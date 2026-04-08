@@ -9,6 +9,7 @@ import sys
 import os
 import unittest
 import io
+import json
 import tempfile
 import logging
 import builtins
@@ -48,8 +49,6 @@ def _make_engine_spec(versions: dict) -> dict:
             }
         }
     }
-
-
 # ---------------------------------------------------------------------------
 # validate_schema
 # ---------------------------------------------------------------------------
@@ -214,15 +213,38 @@ class TestValidateFeatures(unittest.TestCase):
 
 class TestSupportedFeatureManifest(unittest.TestCase):
 
-    def test_manifest_only_exposes_vllm_ears(self):
-        data = load_supported_features()
-        self.assertEqual(set(data["engines"].keys()), {"vllm"})
+    def test_public_manifest_matches_contract_and_packaged_copy(self):
+        root_manifest_path = Path(PROJECT_ROOT) / "supported_features.json"
+        root_manifest = json.loads(root_manifest_path.read_text(encoding="utf-8"))
+        packaged_manifest_path = (
+            Path(PROJECT_ROOT) / "wings_engine_patch" / "wings_engine_patch" / "supported_features.json"
+        )
+        packaged_manifest = json.loads(packaged_manifest_path.read_text(encoding="utf-8"))
 
-        versions = data["engines"]["vllm"]["versions"]
-        self.assertEqual(set(versions.keys()), {"0.17.0"})
-
-        features = versions["0.17.0"]["features"]
-        self.assertEqual(set(features.keys()), {"ears"})
+        self.assertEqual(set(root_manifest["engines"].keys()), {"vllm", "vllm_ascend"})
+        self.assertEqual(
+            set(root_manifest["engines"]["vllm"]["versions"]["0.17.0"]["features"].keys()),
+            {"ears"},
+        )
+        self.assertTrue(root_manifest["engines"]["vllm"]["versions"]["0.17.0"]["is_default"])
+        self.assertEqual(
+            root_manifest["engines"]["vllm"]["versions"]["0.17.0"]["features"]["ears"]["description"],
+            "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on NVIDIA vLLM 0.17.0",
+        )
+        self.assertEqual(
+            set(root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["features"].keys()),
+            {"parallel_spec_decode", "ears"},
+        )
+        self.assertTrue(root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["is_default"])
+        self.assertEqual(
+            root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["features"]["parallel_spec_decode"]["description"],
+            "Fix AscendDraftModelProposer position OOB crash when draft model max_position_embeddings < target model max_model_len (e.g. Qwen3-0.6B + Qwen3-8B)",
+        )
+        self.assertEqual(
+            root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["features"]["ears"]["description"],
+            "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on vllm-ascend 0.17.0",
+        )
+        self.assertEqual(root_manifest, packaged_manifest)
 
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):

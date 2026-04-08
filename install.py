@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 wings-accel Feature Installation CLI
 
 Implements the CLI contract defined in §3.3.6.2.1 of the wings-infer design document.
 
 Usage:
-    python install.py --list
-    python install.py --features '<JSON>'
-    python install.py --features '<JSON>' --dry-run
-    python install.py --check --features '<JSON>'
+    python3 install.py --list
+    python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
+    python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}' --dry-run
+    python3 install.py --check --features '{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
 
 The --features JSON format:
     {
@@ -19,7 +21,8 @@ The --features JSON format:
     }
 
 Example:
-    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+    python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
+    export WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.17.0","features":["ears"]}}'
 
 Deployment layout (all files at the same level as install.py):
     install.py
@@ -611,10 +614,11 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python install.py --list
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}' --dry-run
-  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+  python3 install.py --list
+  python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}'
+  python3 install.py --features '{"vllm":{"version":"0.17.0","features":["ears"]}}' --dry-run
+  python3 install.py --check --features '{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
+  export WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.17.0","features":["ears"]}}'
 """,
     )
     parser.add_argument(
