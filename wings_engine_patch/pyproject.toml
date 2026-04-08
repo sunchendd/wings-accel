@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wings_engine_patch"
+version = "1.0.0"
+description = "Runtime monkey-patch framework for vLLM inference engines"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Proprietary" }
+keywords = ["vllm", "inference", "patch", "monkey-patch"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+]
+dependencies = ["wrapt", "packaging"]
+
+[project.optional-dependencies]
+# vllm (x86/GPU) — currently pure Python patch, reserved for future engine-specific deps
+vllm        = []
+# Development and test dependencies
+dev = [
+    "pytest>=7",
+    "pytest-cov",
+    "build",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wings_engine_patch*"]
+
+[tool.setuptools.package-data]
+wings_engine_patch = ["supported_features.json"]

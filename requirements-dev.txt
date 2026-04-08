@@ -1,0 +1,7 @@
+# Development and test dependencies for wings-accel
+# Install with: pip install -r requirements-dev.txt
+# Or via Makefile: make dev-setup
+
+pytest>=7
+pytest-cov
+build

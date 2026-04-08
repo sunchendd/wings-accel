@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+/wings_engine_patch/build/
+*.egg-info/
+*.egg
+*.whl
+/build/output/*
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Ascend NPU runtime artifacts
+fusion_result.json
+
+# mypy / type checkers
+.mypy_cache/
+.dmypy.json
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.worktrees/

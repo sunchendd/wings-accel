@@ -1,0 +1,18 @@
+[build-system]
+requires = [
+  "cmake>=3.26.1",
+  "ninja",
+  "packaging>=24.2",
+  "setuptools>=77.0.3,<81.0.0",
+  "wheel",
+  "pybind11>=3.0.1",
+  "torch>=2.10.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vsparse"
+version = "0.0.1"
+description = "vLLM v1 sparse module (BMSA and native extensions)"
+requires-python = ">=3.10,<3.14"
+dynamic = ["dependencies", "optional-dependencies"]
