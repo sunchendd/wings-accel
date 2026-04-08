@@ -38,3 +38,4 @@ fusion_result.json
 *.swp
 *.swo
 .worktrees/
+.worktrees
