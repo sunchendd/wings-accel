@@ -210,9 +210,9 @@ class TestAutoPatchSubprocess(unittest.TestCase):
       - Patch hooks are registered (wrapt hooks are set up)
     """
 
-    ADAPTIVE_DRAFT_OPTIONS = '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
-    ADAPTIVE_DRAFT_LOG = '[wins-accel] adaptive_draft_model patch enabled'
-    ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
+    ADAPTIVE_DRAFT_OPTIONS = '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+    ADAPTIVE_DRAFT_LOG = '[wins-accel] ears patch enabled'
+    ADAPTIVE_DRAFT_WARNING = "Feature 'ears' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
@@ -234,7 +234,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
 
     def test_auto_patch_missing_version_warns(self):
         """Missing 'version' key in config should produce a warning, not crash."""
-        bad_options = '{"vllm": {"features": ["adaptive_draft_model"]}}'
+        bad_options = '{"vllm": {"features": ["ears"]}}'
         code = "import wings_engine_patch._auto_patch; print('ok')"
         rc, stdout, stderr = _run_python(
             code,
@@ -274,7 +274,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
             env_extra={
                 "WINGS_ENGINE_PATCH_OPTIONS": (
                     '{"vllm": {"version": "0.12.0", '
-                    '"features": ["adaptive_draft_model"]}}'
+                    '"features": ["ears"]}}'
                 )
             },
         )
@@ -289,7 +289,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
             env_extra={
                 "WINGS_ENGINE_PATCH_OPTIONS": (
                     '{"vllm": {"version": "0.18.0", '
-                    '"features": ["adaptive_draft_model"]}}'
+                    '"features": ["ears"]}}'
                 )
             },
         )
@@ -299,8 +299,8 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertIn("Trying default patch set '0.17.0'", stderr)
         self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
 
-    def test_auto_patch_adaptive_draft_model_logs_on_startup(self):
-        """adaptive_draft_model should log to stderr when auto-patch enables it at startup."""
+    def test_auto_patch_ears_logs_on_startup(self):
+        """ears should log to stderr when auto-patch enables it at startup."""
         code = "print('startup_probe')"
         rc, stdout, stderr = _run_python(
             code,
@@ -311,22 +311,22 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertNotIn(
             self.ADAPTIVE_DRAFT_WARNING,
             stderr,
-            f"adaptive_draft_model should be registered during startup, not rejected as missing:\n{stderr}",
+            f"ears should be registered during startup, not rejected as missing:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_FAILURE_LOG,
             stderr,
-            f"adaptive_draft_model startup should not report patch failures:\n{stderr}",
+            f"ears startup should not report patch failures:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_EXECUTION_ERROR_LOG,
             stderr,
-            f"adaptive_draft_model startup should not report patch execution errors:\n{stderr}",
+            f"ears startup should not report patch execution errors:\n{stderr}",
         )
         self.assertIn(
             self.ADAPTIVE_DRAFT_LOG,
             stderr,
-            f"Expected adaptive_draft_model startup log in stderr, got:\n{stderr}",
+            f"Expected ears startup log in stderr, got:\n{stderr}",
         )
 
 # ---------------------------------------------------------------------------

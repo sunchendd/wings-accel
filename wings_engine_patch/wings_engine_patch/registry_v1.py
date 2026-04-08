@@ -20,17 +20,13 @@ from packaging.version import InvalidVersion, Version
 
 def _build_vllm_v0_17_0_features():
     from wings_engine_patch.patch_vllm_container.v0_17_0 import (
-        adaptive_draft_model_patch,
-        sparse_kv_patch,
+        ears_patch,
     )
 
     return {
         "features": {
-            "adaptive_draft_model": [
-                adaptive_draft_model_patch.patch_vllm_adaptive_draft_model,
-            ],
-            "sparse_kv": [
-                sparse_kv_patch.patch_vllm_sparse_kv,
+            "ears": [
+                ears_patch.patch_vllm_ears,
             ],
         }
     }

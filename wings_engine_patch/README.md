@@ -6,7 +6,7 @@ Wings Engine Patch is a lightweight, dynamic patching framework designed to inje
 
 *   **Non-Intrusive**: Patches are applied at runtime using Python's import hooks and `wrapt`, ensuring the original package installation remains pristine.
 *   **Version Controlled**: Patches are strictly scoped to specific engine versions (e.g., `vllm` version `0.17.0`).
-*   **Feature-Based Management**: Patches are grouped into named "features" (for example `adaptive_draft_model`). Users enable features, not individual files.
+*   **Feature-Based Management**: Patches are grouped into named "features" (for example `ears`). Users enable features, not individual files.
 *   **Intelligent Dependency Resolution**:
     *   **Shared Patches**: If multiple features rely on the same underlying patch implementation, enabling one automatically activates the shared components.
     *   **Deduplication**: The engine ensures that any specific patch function is executed exactly once, regardless of how many enabled features require it.
@@ -26,7 +26,8 @@ make install     # build + pip install into current environment
 **Or use the install CLI directly:**
 
 ```bash
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+python install.py --install-runtime-deps
+python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
 ```
 
 **Manual (advanced):**
@@ -54,13 +55,13 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `adaptive_draft_model` patch for `vllm` version `0.17.0`:
+To enable the `ears` patch for `vllm` version `0.17.0`:
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{
     "vllm": {
         "version": "0.17.0",
-        "features": ["adaptive_draft_model"]
+        "features": ["ears"]
     }
 }'
 
@@ -120,4 +121,4 @@ wings_engine_patch/
 
 ### Feature Propagation and Patch Deduplication
 
-The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In the simplified repository, only the `adaptive_draft_model` feature is shipped, so there is no multi-feature propagation in normal use.
+The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In this repository, `ears` is the public runtime feature shipped for vLLM `0.17.0`.

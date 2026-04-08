@@ -122,11 +122,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
 class TestAutoPatchModule(unittest.TestCase):
     """Unit tests for _auto_patch.py boot-time logic via importlib.reload."""
 
-    ADAPTIVE_DRAFT_OPTIONS = json.dumps(
-        {'vllm': {'version': '0.17.0', 'features': ['adaptive_draft_model']}}
+    EARS_OPTIONS = json.dumps(
+        {'vllm': {'version': '0.17.0', 'features': ['ears']}}
     )
-    ADAPTIVE_DRAFT_LOG = '[wins-accel] adaptive_draft_model patch enabled'
-    ADAPTIVE_DRAFT_WARNING = "Feature 'adaptive_draft_model' not found in registry"
+    EARS_LOG = '[wins-accel] ears patch enabled'
+    EARS_WARNING = "Feature 'ears' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
@@ -147,7 +147,7 @@ class TestAutoPatchModule(unittest.TestCase):
     def test_auto_patch_missing_version_warns(self):
         """Config with no 'version' key → Warning, patch not applied."""
         buf = io.StringIO()
-        opts = json.dumps({'vllm': {'features': ['adaptive_draft_model']}})
+        opts = json.dumps({'vllm': {'features': ['ears']}})
         with patch('sys.stderr', buf):
             self._run_auto_patch(opts)
         self.assertIn('missing', buf.getvalue().lower())
@@ -202,7 +202,7 @@ class TestAutoPatchModule(unittest.TestCase):
         import importlib
         import wings_engine_patch._auto_patch as ap_mod
 
-        opts = json.dumps({'vllm': {'version': '0.12.0', 'features': ['adaptive_draft_model']}})
+        opts = json.dumps({'vllm': {'version': '0.12.0', 'features': ['ears']}})
         with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}, clear=False):
             # pylint: disable=avoid-using-exit
             with self.assertRaises(SystemExit):
@@ -238,40 +238,40 @@ class TestAutoPatchModule(unittest.TestCase):
             rv1._registered_patches = orig
         # pylint: enable=protected-access,avoid-using-exit
 
-    def test_auto_patch_adaptive_draft_feature_logs(self):
-        """adaptive_draft_model should emit its startup log when auto-patch enables it."""
+    def test_auto_patch_ears_feature_logs(self):
+        """ears should emit its startup log when auto-patch enables it."""
         buf = io.StringIO()
         fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
         with patch('sys.stderr', buf):
             with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
-                self._run_auto_patch(self.ADAPTIVE_DRAFT_OPTIONS)
+                self._run_auto_patch(self.EARS_OPTIONS)
 
         stderr = buf.getvalue()
         self.assertNotIn(
-            self.ADAPTIVE_DRAFT_WARNING,
+            self.EARS_WARNING,
             stderr,
-            f"adaptive_draft_model should be registered, not rejected as missing:\n{stderr}",
+            f"ears should be registered, not rejected as missing:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_FAILURE_LOG,
             stderr,
-            f"adaptive_draft_model startup should not report patch failures:\n{stderr}",
+            f"ears startup should not report patch failures:\n{stderr}",
         )
         self.assertNotIn(
             self.PATCH_EXECUTION_ERROR_LOG,
             stderr,
-            f"adaptive_draft_model startup should not report patch execution errors:\n{stderr}",
+            f"ears startup should not report patch execution errors:\n{stderr}",
         )
         self.assertIn(
-            self.ADAPTIVE_DRAFT_LOG,
+            self.EARS_LOG,
             stderr,
-            'Expected adaptive_draft_model startup log when auto-patching vllm',
+            'Expected ears startup log when auto-patching vllm',
         )
 
     def test_auto_patch_future_patch_release_warns_and_falls_back(self):
         buf = io.StringIO()
         future_patch_options = json.dumps(
-            {'vllm': {'version': '0.17.1', 'features': ['adaptive_draft_model']}}
+            {'vllm': {'version': '0.17.1', 'features': ['ears']}}
         )
         fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
         with patch('sys.stderr', buf):
@@ -281,7 +281,7 @@ class TestAutoPatchModule(unittest.TestCase):
         stderr = buf.getvalue()
         self.assertIn("newer than highest validated version '0.17.0'", stderr)
         self.assertIn("Trying default patch set '0.17.0'", stderr)
-        self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
+        self.assertIn(self.EARS_LOG, stderr)
 
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""

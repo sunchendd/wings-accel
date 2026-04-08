@@ -12,6 +12,7 @@ import io
 import tempfile
 import logging
 import builtins
+import importlib.util
 from pathlib import Path
 from unittest.mock import patch
 
@@ -175,7 +176,7 @@ class TestValidateFeatures(unittest.TestCase):
             validate_features(
                 "myengine",
                 "1.0.0",
-                ["adaptive_draft_model"],
+                ["ears"],
                 self._version_spec(),
             )
         finally:
@@ -204,7 +205,7 @@ class TestValidateFeatures(unittest.TestCase):
         self.assertEqual(captured.getvalue(), "")
 
     def _version_spec(self):
-        return {"features": {"adaptive_draft_model": {}, "metrics": {}}}
+        return {"features": {"ears": {}, "metrics": {}}}
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +214,7 @@ class TestValidateFeatures(unittest.TestCase):
 
 class TestSupportedFeatureManifest(unittest.TestCase):
 
-    def test_manifest_only_exposes_vllm_adaptive_draft_model(self):
+    def test_manifest_only_exposes_vllm_ears(self):
         data = load_supported_features()
         self.assertEqual(set(data["engines"].keys()), {"vllm"})
 
@@ -221,8 +222,7 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(set(versions.keys()), {"0.17.0"})
 
         features = versions["0.17.0"]["features"]
-        self.assertIn("adaptive_draft_model", features)
-        self.assertIn("sparse_kv", features)
+        self.assertEqual(set(features.keys()), {"ears"})
 
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):
@@ -259,6 +259,20 @@ class TestFindLocalWheel(unittest.TestCase):
 
             self.assertEqual(found, newer)
 
+    def test_find_local_whl_reads_delivery_directory_even_if_not_named_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            delivery_dir = Path(tmpdir) / "wings-output"
+            delivery_dir.mkdir(parents=True)
+
+            wheel_path = delivery_dir / "wings_engine_patch-1.2.3-py3-none-any.whl"
+            wheel_path.write_text("wheel", encoding="utf-8")
+
+            with patch.object(install_module, "_BASE_DIR", delivery_dir):
+                with patch.object(install_module, "_LOCAL_WHEEL_DIR", delivery_dir / "build" / "output"):
+                    found = install_module._find_local_whl()  # pylint: disable=protected-access
+
+            self.assertEqual(found, wheel_path)
+
 
 class TestInstallEngine(unittest.TestCase):
 
@@ -274,7 +288,7 @@ class TestInstallEngine(unittest.TestCase):
                     install_module.install_engine(
                         "vllm",
                         "0.17.0",
-                        ["adaptive_draft_model"],
+                        ["ears"],
                         dry_run=True,
                     )
                 finally:
@@ -283,6 +297,29 @@ class TestInstallEngine(unittest.TestCase):
         output = captured.getvalue()
         self.assertIn("--no-deps", output)
         self.assertIn(str(wheel_path), output)
+
+    def test_local_wheel_dry_run_uses_find_links_without_force_reinstall_when_runtime_deps_missing(self):
+        captured = io.StringIO()
+        wheel_path = Path("/tmp/wings_engine_patch-1.0.0-py3-none-any.whl")
+
+        with patch.object(install_module, "_find_local_whl", return_value=wheel_path):
+            with patch.object(install_module, "_has_local_runtime_deps", return_value=False):
+                orig = sys.stdout
+                sys.stdout = captured
+                try:
+                    install_module.install_engine(
+                        "vllm",
+                        "0.17.0",
+                        ["ears"],
+                        dry_run=True,
+                    )
+                finally:
+                    sys.stdout = orig
+
+        output = captured.getvalue()
+        self.assertIn("--no-index", output)
+        self.assertIn("--find-links", output)
+        self.assertNotIn("--force-reinstall", output)
 
 
 class TestLocalRuntimeDeps(unittest.TestCase):
@@ -297,6 +334,28 @@ class TestLocalRuntimeDeps(unittest.TestCase):
 
         with patch("builtins.__import__", side_effect=fake_import):
             self.assertFalse(install_module._has_local_runtime_deps())  # pylint: disable=protected-access
+
+
+class TestInstallCliBootstrap(unittest.TestCase):
+
+    def test_install_module_imports_without_packaging_installed(self):
+        install_path = Path(PROJECT_ROOT) / "install.py"
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "packaging.version":
+                raise ImportError("packaging unavailable")
+            if name == "packaging":
+                raise ImportError("packaging unavailable")
+            return original_import(name, *args, **kwargs)
+
+        module_spec = importlib.util.spec_from_file_location("install_bootstrap_test", install_path)
+        bootstrap_module = importlib.util.module_from_spec(module_spec)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            module_spec.loader.exec_module(bootstrap_module)
+
+        self.assertTrue(hasattr(bootstrap_module, "install_runtime_dependencies"))
 
     def test_has_local_runtime_deps_requires_wrapt(self):
         original_import = builtins.__import__
@@ -410,14 +469,14 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
     def test_typo_feature_key_warns(self):
         # 'feature' instead of 'features' — should warn
         output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.17.0", "feature": ["adaptive_draft_model"]}}'
+            '{"vllm": {"version": "0.17.0", "feature": ["ears"]}}'
         )
         self.assertIn("unknown keys", output.lower())
         self.assertIn("feature", output)
 
     def test_correct_keys_no_warning(self):
         output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+            '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
         )
         self.assertNotIn("unknown keys", output.lower())
 
@@ -430,6 +489,53 @@ class TestUnknownEngineConfigKeys(unittest.TestCase):
                 with suppress(SystemExit):  # pylint: disable=avoid-using-exit
                     install_main()
         return captured.getvalue()
+
+
+class TestRuntimeDependencyInstallFlow(unittest.TestCase):
+
+    def test_main_installs_runtime_dependencies_before_engine_install(self):
+        import unittest.mock as mock
+        from contextlib import suppress
+
+        events = []
+        features_json = '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with mock.patch.object(
+                install_module,
+                "install_runtime_dependencies",
+                side_effect=lambda dry_run=False: events.append(("deps", dry_run)),
+                create=True,
+            ):
+                with mock.patch.object(
+                    install_module,
+                    "install_engine",
+                    side_effect=lambda *args, **kwargs: events.append(("engine", kwargs["dry_run"])),
+                ):
+                    with suppress(SystemExit):  # pylint: disable=avoid-using-exit
+                        install_main()
+
+        self.assertEqual(events, [("deps", True), ("engine", True)])
+
+    def test_runtime_dependency_only_mode_runs_without_features(self):
+        import unittest.mock as mock
+        from contextlib import suppress
+
+        calls = []
+
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--install-runtime-deps"]):
+            with mock.patch.object(
+                install_module,
+                "install_runtime_dependencies",
+                side_effect=lambda dry_run=False: calls.append(("deps", dry_run)),
+                create=True,
+            ):
+                with mock.patch.object(install_module, "install_engine") as install_engine:
+                    with suppress(SystemExit):  # pylint: disable=avoid-using-exit
+                        install_main()
+
+        install_engine.assert_not_called()
+        self.assertEqual(calls, [("deps", True)])
 
 
 if __name__ == "__main__":

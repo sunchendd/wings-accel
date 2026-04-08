@@ -164,14 +164,11 @@ def _attach_fake_signature(function, parameter_names, *, optional_parameter_name
 
 
 class TestAdaptiveDraftModelManifest(unittest.TestCase):
-    def test_manifest_advertises_vllm_0170_adaptive_draft_model(self):
+    def test_manifest_keeps_adaptive_draft_internal_only(self):
         data = load_supported_features()
         versions = data["engines"]["vllm"]["versions"]
         self.assertIn("0.17.0", versions)
-        self.assertIn(
-            "adaptive_draft_model",
-            set(versions["0.17.0"]["features"].keys()),
-        )
+        self.assertNotIn("adaptive_draft_model", set(versions["0.17.0"]["features"].keys()))
 
 
 class TestAdaptiveDraftModelPatchModule(unittest.TestCase):
