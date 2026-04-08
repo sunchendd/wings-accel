@@ -2,6 +2,8 @@ PYTHON   := python3
 VENV     := .venv
 PYTHON  := $(abspath $(VENV)/bin/python)
 PKG_DIR  := wings_engine_patch
+NATIVE_PKG_DIR := $(patsubst %/,%,$(dir $(wildcard */native)))
+NATIVE_PKG_ARTIFACTS := $(if $(NATIVE_PKG_DIR),$(addprefix $(NATIVE_PKG_DIR)/,dist build build_* native/*.so))
 
 # Default features for check/validate targets (override on CLI)
 FEATURES ?= {"vllm":{"version":"0.17.0","features":["ears"]}}
@@ -38,7 +40,7 @@ list:
 
 ## clean      — 清理编译产物
 clean:
-	rm -rf build/output build/tmp build/pkg sparsekv/dist sparsekv/build sparsekv/build_* sparsekv/native/*.so $(PKG_DIR)/dist $(PKG_DIR)/build $(PKG_DIR)/*.egg-info
+	rm -rf build/output build/tmp build/pkg $(NATIVE_PKG_ARTIFACTS) $(PKG_DIR)/dist $(PKG_DIR)/build $(PKG_DIR)/*.egg-info
 
 ## dev-setup  — 安装开发依赖（pytest 等）
 dev-setup:
