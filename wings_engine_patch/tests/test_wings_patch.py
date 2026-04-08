@@ -125,7 +125,16 @@ class TestAutoPatchModule(unittest.TestCase):
     EARS_OPTIONS = json.dumps(
         {'vllm': {'version': '0.17.0', 'features': ['ears']}}
     )
+    ASCEND_COMBINED_OPTIONS = json.dumps(
+        {
+            'vllm_ascend': {
+                'version': '0.17.0',
+                'features': ['parallel_spec_decode', 'ears'],
+            }
+        }
+    )
     EARS_LOG = '[wins-accel] ears patch enabled'
+    PARALLEL_SPEC_DECODE_LOG = '[Wings Engine Patch] vllm_ascend parallel_spec_decode patch enabled'
     EARS_WARNING = "Feature 'ears' not found in registry"
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
@@ -268,6 +277,57 @@ class TestAutoPatchModule(unittest.TestCase):
             'Expected ears startup log when auto-patching vllm',
         )
 
+    def test_auto_patch_vllm_ascend_combined_features_load_cleanly(self):
+        """parallel_spec_decode and ears should load together for vllm_ascend."""
+        buf = io.StringIO()
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        # pylint: disable=protected-access
+        ascend_spec = registry_v1._registered_patches['vllm_ascend']['0.17.0']
+        original_features = ascend_spec.pop('features', None)
+        original_non_propagating = ascend_spec.pop('non_propagating_patches', None)
+        try:
+            with patch('sys.stderr', buf):
+                with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                    self._run_auto_patch(self.ASCEND_COMBINED_OPTIONS)
+        finally:
+            if original_features is not None:
+                ascend_spec['features'] = original_features
+            if original_non_propagating is not None:
+                ascend_spec['non_propagating_patches'] = original_non_propagating
+        # pylint: enable=protected-access
+
+        stderr = buf.getvalue()
+        self.assertNotIn(
+            'not found in registry',
+            stderr,
+            f"Combined Ascend auto-patch should not reject registered features:\n{stderr}",
+        )
+        self.assertNotIn(
+            'Error loading patches',
+            stderr,
+            f"Combined Ascend auto-patch should load both features cleanly:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_FAILURE_LOG,
+            stderr,
+            f"Combined Ascend auto-patch should not report patch failures:\n{stderr}",
+        )
+        self.assertNotIn(
+            self.PATCH_EXECUTION_ERROR_LOG,
+            stderr,
+            f"Combined Ascend auto-patch should not report patch execution errors:\n{stderr}",
+        )
+        self.assertIn(
+            self.PARALLEL_SPEC_DECODE_LOG,
+            stderr,
+            'Expected parallel_spec_decode startup log when auto-patching vllm_ascend',
+        )
+        self.assertIn(
+            self.EARS_LOG,
+            stderr,
+            'Expected ears startup log when auto-patching vllm_ascend',
+        )
+
     def test_auto_patch_future_patch_release_warns_and_falls_back(self):
         buf = io.StringIO()
         future_patch_options = json.dumps(
@@ -297,6 +357,54 @@ class TestAutoPatchModule(unittest.TestCase):
         with patch.dict(os.environ, env_patch, clear=False):
             # Reload triggers the module-level try/except block again
             importlib.reload(ap_mod)
+
+
+class TestAscendCombinedRuntime(unittest.TestCase):
+    def test_enable_vllm_ascend_combined_features_returns_no_failures_with_stubbed_patches(self):
+        parallel_patch_called = MagicMock()
+        ears_patch_called = MagicMock()
+
+        def fake_parallel_spec_decode_patch():
+            parallel_patch_called()
+
+        def fake_ears_patch():
+            ears_patch_called()
+
+        fake_parallel_spec_decode_patch.__module__ = 'test_runtime'
+        fake_parallel_spec_decode_patch.__name__ = 'fake_parallel_spec_decode_patch'
+        fake_ears_patch.__module__ = 'test_runtime'
+        fake_ears_patch.__name__ = 'fake_ears_patch'
+
+        # pylint: disable=protected-access
+        original_registry = registry_v1._registered_patches
+        registry_v1._registered_patches = {
+            **original_registry,
+            'vllm_ascend': {
+                **original_registry['vllm_ascend'],
+                '0.17.0': {
+                    'is_default': original_registry['vllm_ascend']['0.17.0']['is_default'],
+                    'builder': lambda: {
+                        'features': {
+                            'parallel_spec_decode': [fake_parallel_spec_decode_patch],
+                            'ears': [fake_ears_patch],
+                        }
+                    },
+                },
+            },
+        }
+        try:
+            failures = registry_v1.enable(
+                'vllm_ascend',
+                ['parallel_spec_decode', 'ears'],
+                version='0.17.0',
+            )
+        finally:
+            registry_v1._registered_patches = original_registry
+        # pylint: enable=protected-access
+
+        self.assertEqual(failures, [])
+        parallel_patch_called.assert_called_once_with()
+        ears_patch_called.assert_called_once_with()
 
 
 if __name__ == '__main__':
