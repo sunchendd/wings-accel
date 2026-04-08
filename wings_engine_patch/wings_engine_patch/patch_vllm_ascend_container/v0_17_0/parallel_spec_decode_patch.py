@@ -13,16 +13,14 @@ Root cause (two bugs in vllm_ascend v0.17.0rc1):
    AscendDraftModelProposer passes the target vllm_config, so self.max_model_len
    equals the target model's limit (e.g. 128K), not the draft's (e.g. 40960).
 
-2. SpecDecodeBaseProposer._propose hardcodes self.vllm_config.model_config.max_model_len
-   for some OOB checks (lines 895/902 in eagle_proposer.py) instead of self.max_model_len.
+2. SpecDecodeBaseProposer._run_merged_draft hardcodes self.vllm_config.model_config.max_model_len
+   for OOB checks (lines 895/902 in eagle_proposer.py) instead of self.max_model_len.
 
 Fix strategy:
 1. Patch AscendDraftModelProposer.__init__ to override self.max_model_len with the
    draft model's max_model_len after super().__init__() completes.
-2. Patch SpecDecodeBaseProposer._propose to replace hardcoded
+2. Patch SpecDecodeBaseProposer._run_merged_draft to replace hardcoded
    self.vllm_config.model_config.max_model_len with self.max_model_len.
-   This is safe for all proposer subclasses: Eagle already sets max_model_len
-   correctly from its draft config, so changing the reference is a no-op for Eagle.
 """
 
 import sys
@@ -67,34 +65,35 @@ def _patch_eagle_proposer_module(module) -> None:
     if cls is None:
         return
 
-    original_propose = getattr(cls, "_propose", None)
-    if original_propose is None:
+    # Bug is in _run_merged_draft, not _propose
+    original_method = getattr(cls, "_run_merged_draft", None)
+    if original_method is None:
         return
-    if getattr(original_propose, "_wings_parallel_spec_patched", False):
+    if getattr(original_method, "_wings_parallel_spec_patched", False):
         return
 
     import inspect
 
-    source = inspect.getsource(original_propose)
+    source = inspect.getsource(original_method)
     # Only patch if the bug is present (hardcoded vllm_config reference)
     if "self.vllm_config.model_config.max_model_len" not in source:
         return
 
-    def patched_propose(self, *args, **kwargs):
+    def patched_run_merged_draft(self, *args, **kwargs):
         # Temporarily shadow vllm_config.model_config.max_model_len with
         # self.max_model_len so that the hardcoded references in the body
-        # of _propose use the correct draft-model limit.
+        # of _run_merged_draft use the correct draft-model limit.
         original_max = self.vllm_config.model_config.max_model_len
         if self.max_model_len != original_max:
             self.vllm_config.model_config.max_model_len = self.max_model_len
             try:
-                return original_propose(self, *args, **kwargs)
+                return original_method(self, *args, **kwargs)
             finally:
                 self.vllm_config.model_config.max_model_len = original_max
-        return original_propose(self, *args, **kwargs)
+        return original_method(self, *args, **kwargs)
 
-    patched_propose._wings_parallel_spec_patched = True  # pylint: disable=protected-access
-    cls._propose = patched_propose
+    patched_run_merged_draft._wings_parallel_spec_patched = True  # pylint: disable=protected-access
+    cls._run_merged_draft = patched_run_merged_draft
 
 
 def patch_vllm_ascend_parallel_spec_decode():
