@@ -150,7 +150,7 @@ Add or preserve Ascend-only support needed for `vllm-ascend` draft behavior to f
 
 Responsibilities:
 
-- implement only the minimum compatibility needed for correctness
+- implement the specific compatibility behaviors listed below and nothing broader
 - remain private to the Ascend path
 - avoid introducing a separate public feature unless requirements change later
 - expose a single private patch entry point or helper boundary dedicated to Ascend-only draft compatibility, so it can be unit-tested independently from the shared sampler and from the generic Ascend runner hook
@@ -172,6 +172,14 @@ Interface contract:
 - input: the imported Ascend runtime module(s) needed for draft compatibility
 - output: patched module state only; no new public registry feature, no return value relied on by callers
 - failure model: idempotent patching, explicit exception propagation for real patch errors, silent no-op only when the targeted Ascend-only module is absent because the current runtime is not Ascend
+
+Target behavior table:
+
+| Target module | Required compatibility behavior |
+|---|---|
+| `vllm_ascend.ascend_forward_context` | Preserve Ascend draft-mode context fields used by the draft path, especially draft-mode state propagation needed by the unified `ears` flow. |
+| `vllm_ascend.compilation.acl_graph` | Preserve draft graph parameter access/update behavior needed when Ascend draft mode is active. |
+| `vllm_ascend.attention.mla_v1` | Keep the Ascend draft-related MLA path callable for supported speculative methods and compatible with the unified `ears` enablement path. |
 
 This compatibility layer may live in the same file initially, but the design preference is to keep it as a distinct helper or submodule so backend-specific logic stays understandable and testable.
 
@@ -267,13 +275,19 @@ The public docs should not advertise:
   - runtime import proves the NVIDIA patch path is registered for `vllm.v1.worker.gpu_model_runner`
   - at least one behavioral regression test proves a supported speculative method can trigger native-sampler replacement on the NVIDIA runner path
 - Ascend: validate two explicit functional targets from `/home/scd/vllm-ascend`
-  - target A: branch `deepseek-ears`
-  - target B: branch `deepseek-mtp`
+  - target A: `deepseek-ears` at commit `12153236f527f7d309eb39803d97c3ac6561435f`
+  - target B: `deepseek-mtp` at commit `42965ef01b5c2f369e62ff6283099fcd051597f5`
 - for each Ascend target, the definition of done is:
   - package install succeeds
   - `install.py --check` succeeds for `vllm@0.17.0` + `ears`
   - runtime import proves the Ascend patch path is registered for the targeted modules
   - at least one behavioral regression test proves the Ascend draft-enabled path remains callable and that EARS sampler enablement still occurs for a supported method
+- Ascend validation procedure for each pinned target:
+  1. check out the pinned commit in `/home/scd/vllm-ascend`
+  2. install the built delivery package into the Ascend validation environment
+  3. run `python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'`
+  4. run a runtime probe importing `vllm_ascend.envs`, `vllm_ascend.worker.model_runner_v1`, `vllm_ascend.ascend_forward_context`, `vllm_ascend.compilation.acl_graph`, and `vllm_ascend.attention.mla_v1`
+  5. run the targeted behavioral regression proving draft-path callability plus sampler enablement
 - No performance benchmark is required for Ascend draft compatibility
 
 ## Implementation Notes
