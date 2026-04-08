@@ -5,9 +5,7 @@ import os
 import sys
 import types
 import unittest
-
-import torch
-
+from unittest import mock
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(PACKAGE_ROOT)
@@ -45,7 +43,7 @@ class TestEarsPatchModule(unittest.TestCase):
         module_spec = importlib.util.spec_from_file_location("ears_patch_bootstrap_test", patch_path)
         bootstrap_module = importlib.util.module_from_spec(module_spec)
 
-        with unittest.mock.patch("builtins.__import__", side_effect=fake_import):
+        with mock.patch("builtins.__import__", side_effect=fake_import):
             module_spec.loader.exec_module(bootstrap_module)
 
         self.assertTrue(hasattr(bootstrap_module, "patch_vllm_ears"))
@@ -59,13 +57,17 @@ class TestEarsPatchModule(unittest.TestCase):
                 raise ImportError("torch unavailable")
             return original_import(name, *args, **kwargs)
 
-        with unittest.mock.patch("builtins.__import__", side_effect=fake_import):
+        with mock.patch("builtins.__import__", side_effect=fake_import):
             from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
 
         self.assertTrue(hasattr(ears_patch, "patch_vllm_ears"))
 
     def test_rejection_random_sample_ears_accepts_high_uncertainty_tokens(self):
         ears_patch = _load_patch_module()
+        try:
+            import torch
+        except ModuleNotFoundError:
+            self.skipTest("torch is not installed")
 
         output = torch.full((1, 3), -1, dtype=torch.int32)
         cu_num_draft_tokens = torch.tensor([2], dtype=torch.int64)
@@ -202,7 +204,7 @@ class TestEarsPatchModule(unittest.TestCase):
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
             ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: FakeEarsSampler  # pylint: disable=protected-access
-            with unittest.mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
+            with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_patch._patch_vllm_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
                 runner = fake_module.GPUModelRunner()
 
