@@ -68,6 +68,8 @@ export WINGS_ENGINE_PATCH_OPTIONS='{
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
+`ears` is the only public vLLM `0.17.0` feature in this delivery. It provides functional support for `mtp`, `eagle3`, and `suffix` speculative decoding on NVIDIA and Ascend. Ascend support is correctness-oriented only and does not include a performance guarantee. `sparse_kv` is intentionally excluded from this delivery.
+
 > **Note**: If the configured version matches the installed engine version, patches are applied. If there is a mismatch, the system may attempt to fall back to a default version configuration if one is defined in the registry.
 
 ## Development
