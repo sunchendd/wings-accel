@@ -221,7 +221,15 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         )
         packaged_manifest = json.loads(packaged_manifest_path.read_text(encoding="utf-8"))
 
+        self.assertEqual(
+            root_manifest["description"],
+            "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
+        )
         self.assertEqual(set(root_manifest["engines"].keys()), {"vllm", "vllm_ascend"})
+        self.assertEqual(
+            root_manifest["engines"]["vllm"]["description"],
+            "Standard vLLM Inference Engine (NVIDIA GPU)",
+        )
         self.assertEqual(
             set(root_manifest["engines"]["vllm"]["versions"]["0.17.0"]["features"].keys()),
             {"ears"},
@@ -234,6 +242,10 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(
             set(root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["features"].keys()),
             {"parallel_spec_decode", "ears"},
+        )
+        self.assertEqual(
+            root_manifest["engines"]["vllm_ascend"]["description"],
+            "vLLM Ascend NPU Engine",
         )
         self.assertTrue(root_manifest["engines"]["vllm_ascend"]["versions"]["0.17.0"]["is_default"])
         self.assertEqual(

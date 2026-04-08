@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0",
   "updated_at": "2026-04-08",
-  "description": "Registry of supported inference engines and their patch capabilities provided by wings-engine-patch.",
+  "description": "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
   "engines": {
     "vllm": {
-      "description": "Standard vLLM Inference Engine",
+      "description": "Standard vLLM Inference Engine (NVIDIA GPU)",
       "versions": {
         "0.17.0": {
           "is_default": true,
@@ -17,7 +17,7 @@
       }
     },
     "vllm_ascend": {
-      "description": "Ascend vLLM Inference Engine",
+      "description": "vLLM Ascend NPU Engine",
       "versions": {
         "0.17.0": {
           "is_default": true,
