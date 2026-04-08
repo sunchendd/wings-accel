@@ -1,4 +1,5 @@
 import copy
+import importlib
 import unittest
 import sys
 import os
@@ -11,6 +12,10 @@ from unittest.mock import patch, MagicMock
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import wings_engine_patch.registry_v1 as registry_v1
 import tests.dummy_patch as dummy_patch
+
+
+def _get_active_registry_v1():
+    return importlib.import_module('wings_engine_patch.registry_v1')
 
 
 class TestWingsPatchMechanism(unittest.TestCase):
@@ -315,11 +320,12 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_vllm_ascend_combined_features_warns_when_engine_effectively_unregistered(self):
         """Removing the only registered Ascend version exercises the unregistered-engine path."""
-        original_registry = copy.deepcopy(registry_v1._registered_patches)
+        registry_module = _get_active_registry_v1()
+        original_registry = copy.deepcopy(registry_module._registered_patches)
         registry_without_ascend_versions = copy.deepcopy(original_registry)
         registry_without_ascend_versions.setdefault('vllm_ascend', {}).pop('0.17.0', None)
         expected_registry = copy.deepcopy(registry_without_ascend_versions)
-        registry_v1._registered_patches = copy.deepcopy(registry_without_ascend_versions)
+        registry_module._registered_patches = copy.deepcopy(registry_without_ascend_versions)
         try:
             buf = io.StringIO()
             fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
@@ -331,22 +337,23 @@ class TestAutoPatchModule(unittest.TestCase):
             self.assertIn("Engine 'vllm_ascend' is not registered.", stderr)
             self.assertNotIn(self.PARALLEL_SPEC_DECODE_LOG, stderr)
             self.assertNotIn(self.EARS_LOG, stderr)
-            self.assertEqual(registry_v1._registered_patches, expected_registry)
+            self.assertEqual(_get_active_registry_v1()._registered_patches, expected_registry)
         finally:
-            registry_v1._registered_patches = original_registry
+            _get_active_registry_v1()._registered_patches = original_registry
 
     def _run_vllm_ascend_combined_auto_patch(self):
         buf = io.StringIO()
         fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        registry_module = _get_active_registry_v1()
         # pylint: disable=protected-access
-        original_registry = registry_v1._registered_patches
-        registry_v1._registered_patches = copy.deepcopy(original_registry)
+        original_registry = registry_module._registered_patches
+        registry_module._registered_patches = copy.deepcopy(original_registry)
         try:
             with patch('sys.stderr', buf):
                 with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
                     self._run_auto_patch(self.ASCEND_COMBINED_OPTIONS)
         finally:
-            registry_v1._registered_patches = original_registry
+            _get_active_registry_v1()._registered_patches = original_registry
         # pylint: enable=protected-access
         return buf.getvalue()
 
@@ -397,9 +404,10 @@ class TestAscendCombinedRuntime(unittest.TestCase):
         fake_ears_patch.__module__ = 'test_runtime'
         fake_ears_patch.__name__ = 'fake_ears_patch'
 
+        registry_module = _get_active_registry_v1()
         # pylint: disable=protected-access
-        original_registry = registry_v1._registered_patches
-        registry_v1._registered_patches = {
+        original_registry = registry_module._registered_patches
+        registry_module._registered_patches = {
             **original_registry,
             'vllm_ascend': {
                 **original_registry['vllm_ascend'],
@@ -415,13 +423,13 @@ class TestAscendCombinedRuntime(unittest.TestCase):
             },
         }
         try:
-            failures = registry_v1.enable(
+            failures = registry_module.enable(
                 'vllm_ascend',
                 ['parallel_spec_decode', 'ears'],
                 version='0.17.0',
             )
         finally:
-            registry_v1._registered_patches = original_registry
+            _get_active_registry_v1()._registered_patches = original_registry
         # pylint: enable=protected-access
 
         self.assertEqual(failures, [])
