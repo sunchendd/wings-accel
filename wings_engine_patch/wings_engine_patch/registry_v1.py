@@ -19,21 +19,45 @@ from packaging.version import InvalidVersion, Version
 # }
 
 def _build_vllm_v0_17_0_features():
+    features = {}
+
+    # adaptive_draft_model and sparse_kv require torch; skip gracefully if unavailable
+    try:
+        from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+            adaptive_draft_model_patch,
+            sparse_kv_patch,
+        )
+        features["adaptive_draft_model"] = [adaptive_draft_model_patch.patch_vllm_adaptive_draft_model]
+        features["sparse_kv"] = [sparse_kv_patch.patch_vllm_sparse_kv]
+    except ImportError:
+        pass
+
+    # ears_patch does NOT require torch at module level
+    from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
+    features["ears"] = [ears_patch.patch_vllm_ears]
+
+    return {"features": features}
+
+
+def _build_vllm_ascend_v0_17_0_features():
+    from wings_engine_patch.patch_vllm_ascend_container.v0_17_0 import (
+        parallel_spec_decode_patch,
+    )
     from wings_engine_patch.patch_vllm_container.v0_17_0 import (
-        adaptive_draft_model_patch,
-        sparse_kv_patch,
+        ears_patch,
     )
 
     return {
         "features": {
-            "adaptive_draft_model": [
-                adaptive_draft_model_patch.patch_vllm_adaptive_draft_model,
+            "parallel_spec_decode": [
+                parallel_spec_decode_patch.patch_vllm_ascend_parallel_spec_decode,
             ],
-            "sparse_kv": [
-                sparse_kv_patch.patch_vllm_sparse_kv,
+            "ears": [
+                ears_patch.patch_vllm_ears,
             ],
         }
     }
+
 
 _registered_patches = {
     'vllm': {
@@ -41,7 +65,13 @@ _registered_patches = {
             'is_default': True,
             'builder': _build_vllm_v0_17_0_features
         }
-    }
+    },
+    'vllm_ascend': {
+        "0.17.0": {
+            'is_default': True,
+            'builder': _build_vllm_ascend_v0_17_0_features
+        }
+    },
 }
 
 _builder_lock = threading.Lock()

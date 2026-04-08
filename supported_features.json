@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-03-12",
+  "updated_at": "2026-04-08",
   "description": "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
   "engines": {
     "vllm": {
@@ -14,6 +14,22 @@
             },
             "sparse_kv": {
               "description": "Enable sparse KV cache attention (BMSA algorithm) for vLLM 0.17.0. Requires vsparse package."
+            }
+          }
+        }
+      }
+    },
+    "vllm_ascend": {
+      "description": "vLLM-Ascend Inference Engine (Ascend NPU)",
+      "versions": {
+        "0.17.0": {
+          "is_default": true,
+          "features": {
+            "parallel_spec_decode": {
+              "description": "Fix AscendDraftModelProposer position OOB crash when draft model max_position_embeddings is smaller than target model max_model_len (e.g. Qwen3-8B + Qwen3-0.6B). Draft only, no performance guarantee."
+            },
+            "ears": {
+              "description": "Enable EARS (Entropy-Adaptive Rejection Sampling) for speculative decoding on vLLM-Ascend 0.17.0. Improves acceptance rate for mtp, eagle3, and suffix methods. Controlled by VLLM_EARS_TOLERANCE env var (default 0.0 = disabled)."
             }
           }
         }
