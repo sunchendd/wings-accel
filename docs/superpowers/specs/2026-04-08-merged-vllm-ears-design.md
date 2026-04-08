@@ -135,6 +135,7 @@ Validation target:
 
 - Ascend runtime import path still patches successfully
 - existing suffix / mtp / eagle3 coverage remains green
+- functional compatibility is checked against the local `vllm-ascend` references in `/home/scd/vllm-ascend`, specifically the `deepseek-ears` and `deepseek-mtp` branches that were cited as the source branches for Ascend behavior
 
 ### 5. Ascend draft compatibility layer
 
@@ -145,6 +146,14 @@ Responsibilities:
 - implement only the minimum compatibility needed for correctness
 - remain private to the Ascend path
 - avoid introducing a separate public feature unless requirements change later
+- expose a single private patch entry point or helper boundary dedicated to Ascend-only draft compatibility, so it can be unit-tested independently from the shared sampler and from the generic Ascend runner hook
+- behave as a no-op when the expected Ascend-only draft modules are not importable in the current environment
+
+Interface contract:
+
+- input: the imported Ascend runtime module(s) needed for draft compatibility
+- output: patched module state only; no new public registry feature, no return value relied on by callers
+- failure model: idempotent patching, explicit exception propagation for real patch errors, silent no-op only when the targeted Ascend-only module is absent because the current runtime is not Ascend
 
 This compatibility layer may live in the same file initially, but the design preference is to keep it as a distinct helper or submodule so backend-specific logic stays understandable and testable.
 
@@ -160,7 +169,9 @@ This compatibility layer may live in the same file initially, but the design pre
    - Ascend model runner
    - any Ascend-only draft compatibility helper modules that need patching
 6. The first backend-specific module import triggers the matching patch path.
-7. When a runner is initialized or drafter setup completes, the shared EARS sampler layer swaps in the adaptive rejection sampler for supported methods.
+7. If a backend-specific module is never imported on the current machine, its patch path remains dormant and must not fail startup.
+8. If a backend-specific module import hook fires in the wrong environment and the targeted module surface is missing, that path should degrade to a no-op rather than breaking startup.
+9. When a runner is initialized or drafter setup completes, the shared EARS sampler layer swaps in the adaptive rejection sampler for supported methods.
 
 ## Delivery Surface
 
@@ -190,6 +201,9 @@ The public docs should not advertise:
 - Unsupported historical versions must still fail clearly.
 - Newer unvalidated versions must still warn and fall back to the default validated patch set.
 - Backend-specific hooks should remain idempotent and should not silently replace unrelated sampler state when the speculative method is unsupported or tolerance is disabled.
+- NVIDIA-only module absence in Ascend environments, and Ascend-only module absence in NVIDIA environments, must not break startup.
+- Unsupported speculative methods must leave the native sampler untouched.
+- Re-registering the same hook path multiple times must not stack wrappers or duplicate side effects.
 
 ## Testing Strategy
 
@@ -205,8 +219,13 @@ The public docs should not advertise:
   - supported methods `mtp`, `eagle3`, `suffix`
   - NVIDIA `GPUModelRunner` hook
   - Ascend `NPUModelRunner` hook
+  - Ascend draft compatibility helper boundary
   - lazy import safety
   - tolerance-driven sampler replacement
+  - unsupported speculative methods preserve the native sampler
+  - zero or missing tolerance preserves the native sampler
+  - repeated patch registration is idempotent
+  - missing backend-specific modules are safe no-ops in the opposite architecture
 - tests proving `adaptive_draft_model` remains internal-only or absent from the public surface
 - tests proving `sparse_kv` is excluded from delivery-visible manifests and install paths
 
@@ -219,7 +238,7 @@ The public docs should not advertise:
 ### Runtime validation
 
 - NVIDIA: validate install, `--check`, and auto-patch behavior in `vllm/vllm-openai:v0.17.0`
-- Ascend: validate install, `--check`, and runtime patch activation in the relevant `vllm-ascend` environment
+- Ascend: validate install, `--check`, and runtime patch activation against the locally referenced `vllm-ascend` code paths represented by `/home/scd/vllm-ascend` branch targets `deepseek-ears` and `deepseek-mtp`, or an execution environment built from those references
 - No performance benchmark is required for Ascend draft compatibility
 
 ## Implementation Notes
@@ -249,4 +268,3 @@ Mitigation: keep manifests, registry, README, and install behavior centered on a
 3. Recheck install/build/docs so all public surfaces still expose only `ears`.
 4. Validate NVIDIA and Ascend runtime paths independently.
 5. Keep `sparse_kv` excluded from delivery and validation.
-
