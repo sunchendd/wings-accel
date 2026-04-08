@@ -104,6 +104,13 @@ Responsibilities:
 - own tolerance parsing and sampler replacement rules
 - avoid importing heavy engine modules at module import time
 
+Interface contract:
+
+- input: runner instance exposing `speculative_config`, `sampler`, and `rejection_sampler`
+- decision: enable only when method is one of `mtp`, `eagle3`, `suffix` and tolerance is positive
+- output: either leave the native sampler untouched or replace it with the EARS sampler
+- non-goal: selecting backend-specific import hooks or mutating unrelated runner state
+
 This layer should not decide how the runner is reached; it should only provide the sampler and the backend-agnostic enablement predicate.
 
 ### 3. NVIDIA runtime hook layer
@@ -148,6 +155,10 @@ Responsibilities:
 - avoid introducing a separate public feature unless requirements change later
 - expose a single private patch entry point or helper boundary dedicated to Ascend-only draft compatibility, so it can be unit-tested independently from the shared sampler and from the generic Ascend runner hook
 - behave as a no-op when the expected Ascend-only draft modules are not importable in the current environment
+- target the concrete Ascend draft-related control points identified from the `deepseek-ears` and `deepseek-mtp` references:
+  - `vllm_ascend.ascend_forward_context`
+  - `vllm_ascend.compilation.acl_graph`
+  - `vllm_ascend.attention.mla_v1`
 
 Interface contract:
 
@@ -167,7 +178,7 @@ This compatibility layer may live in the same file initially, but the design pre
    - NVIDIA `GPUModelRunner`
    - Ascend envs
    - Ascend model runner
-   - any Ascend-only draft compatibility helper modules that need patching
+   - Ascend draft compatibility helpers for `vllm_ascend.ascend_forward_context`, `vllm_ascend.compilation.acl_graph`, and `vllm_ascend.attention.mla_v1`
 6. The first backend-specific module import triggers the matching patch path.
 7. If a backend-specific module is never imported on the current machine, its patch path remains dormant and must not fail startup.
 8. If a backend-specific module import hook fires in the wrong environment and the targeted module surface is missing, that path should degrade to a no-op rather than breaking startup.
@@ -180,6 +191,12 @@ After integration, the public surface should be:
 - engine: `vllm`
 - version: `0.17.0`
 - feature: `ears`
+
+Registry / manifest rule:
+
+- `supported_features.json` continues to expose only `vllm@0.17.0 -> ears`
+- `vllm-ascend` is not added as a second public engine key for this delivery
+- Ascend support is represented as an internal compatibility path that activates only when `vllm_ascend` is present at runtime next to the supported vLLM installation
 
 The public docs should explicitly state:
 
@@ -238,7 +255,13 @@ The public docs should not advertise:
 ### Runtime validation
 
 - NVIDIA: validate install, `--check`, and auto-patch behavior in `vllm/vllm-openai:v0.17.0`
-- Ascend: validate install, `--check`, and runtime patch activation against the locally referenced `vllm-ascend` code paths represented by `/home/scd/vllm-ascend` branch targets `deepseek-ears` and `deepseek-mtp`, or an execution environment built from those references
+- Ascend: validate two explicit functional targets from `/home/scd/vllm-ascend`
+  - target A: branch `deepseek-ears`
+  - target B: branch `deepseek-mtp`
+- for each Ascend target, the definition of done is:
+  - package install succeeds
+  - `install.py --check` succeeds for `vllm@0.17.0` + `ears`
+  - runtime import proves the Ascend patch path is registered for the targeted modules
 - No performance benchmark is required for Ascend draft compatibility
 
 ## Implementation Notes
