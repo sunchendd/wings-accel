@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from importlib import import_module
 from pathlib import Path
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -17,6 +18,19 @@ class TestPublicSurface(unittest.TestCase):
     def test_registry_builder_only_exposes_ears(self):
         feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
         self.assertEqual(list(feature_map.keys()), ["ears"])
+
+    def test_v0_17_0_package_root_keeps_ascend_helpers_private(self):
+        package = import_module("wings_engine_patch.patch_vllm_container.v0_17_0")
+
+        self.assertNotIn("ears_ascend_runtime_hooks", package.__all__)
+        self.assertNotIn("patch_vllm_ascend_draft_compat", package.__all__)
+        with self.assertRaises(AttributeError):
+            getattr(package, "patch_vllm_ascend_draft_compat")
+        with self.assertRaises(ImportError):
+            exec(
+                "from wings_engine_patch.patch_vllm_container.v0_17_0 import patch_vllm_ascend_draft_compat",
+                {},
+            )
 
     def test_root_and_package_manifests_only_expose_public_surface(self):
         root_manifest = json.loads((Path(PROJECT_ROOT) / "supported_features.json").read_text(encoding="utf-8"))

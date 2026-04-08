@@ -26,12 +26,11 @@ def _purge_wings_engine_patch_modules():
 def _load_ascend_compat_modules():
     _purge_wings_engine_patch_modules()
     from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import patch_vllm_ascend_draft_compat
     ears_ascend_compat = importlib.import_module(
         "wings_engine_patch.patch_vllm_container.v0_17_0.ears_ascend_compat"
     )
 
-    return ears_patch, ears_ascend_compat, patch_vllm_ascend_draft_compat
+    return ears_patch, ears_ascend_compat, ears_patch.patch_vllm_ascend_draft_compat
 
 
 def _registered_hooks(ears_patch):

@@ -1,3 +1,4 @@
+import importlib
 import os
 import sys
 import types
@@ -17,8 +18,10 @@ def _purge_wings_engine_patch_modules():
 
 def _load_ascend_modules():
     _purge_wings_engine_patch_modules()
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_ascend_runtime_hooks
     from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
+    ears_ascend_runtime_hooks = importlib.import_module(
+        "wings_engine_patch.patch_vllm_container.v0_17_0.ears_ascend_runtime_hooks"
+    )
 
     return ears_patch, ears_ascend_runtime_hooks
 
