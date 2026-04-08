@@ -4,7 +4,7 @@ import sys
 
 
 LOGGER = logging.getLogger("wings_accel.ears")
-_SUPPORTED_EARS_METHODS = {"mtp", "eagle3"}
+_SUPPORTED_EARS_METHODS = {"mtp", "eagle3", "suffix"}
 _EARS_REJECTION_SAMPLER_CLASS = None
 
 
