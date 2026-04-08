@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """
 wings-accel Feature Installation CLI
 
@@ -32,6 +30,8 @@ Deployment layout (all files at the same level as install.py):
     wrapt-*-linux_aarch64.whl
     arctic_inference-*.whl      (pre-built wheel, installed offline)
 """
+
+from __future__ import annotations
 
 import argparse
 import importlib.util
