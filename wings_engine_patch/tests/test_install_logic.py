@@ -26,9 +26,9 @@ sys.path.append(PROJECT_ROOT)
 import install as install_module
 from install import (
     load_supported_features,
+    parse_requested_install,
     validate_schema,
     resolve_version,
-    validate_features,
     main as install_main,
 )
 import wings_engine_patch.registry_v1 as registry_v1
@@ -162,49 +162,107 @@ class TestResolveVersion(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# validate_features
+# parse_requested_install
 # ---------------------------------------------------------------------------
 
-class TestValidateFeatures(unittest.TestCase):
+class TestParseRequestedInstall(unittest.TestCase):
 
-    def test_known_feature_produces_no_warning(self):
+    def test_multi_engine_payload_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({
+                    "vllm": {"version": "0.17.0", "features": ["ears"]},
+                    "vllm_ascend": {"version": "0.17.0", "features": ["ears"]},
+                }),
+                load_supported_features(),
+            )
+        self.assertIn("exactly one top-level engine", str(ctx.exception))
+
+    def test_hidden_feature_rejected_before_pip(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({
+                    "vllm_ascend": {
+                        "version": "0.17.0",
+                        "features": ["adaptive_draft_model"],
+                    }
+                }),
+                load_supported_features(),
+            )
+        self.assertIn("adaptive_draft_model", str(ctx.exception))
+        self.assertIn("publicly supported", str(ctx.exception))
+
+    def test_malformed_json_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install('{"vllm":', load_supported_features())
+        self.assertIn("not valid JSON", str(ctx.exception))
+
+    def test_missing_version_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"features": ["ears"]}}),
+                load_supported_features(),
+            )
+        self.assertIn("'version' is required", str(ctx.exception))
+
+    def test_missing_features_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.0"}}),
+                load_supported_features(),
+            )
+        self.assertIn("'features' is required", str(ctx.exception))
+
+    def test_empty_features_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.0", "features": []}}),
+                load_supported_features(),
+            )
+        self.assertIn("must be a non-empty list", str(ctx.exception))
+
+    def test_unknown_engine_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"unknown_engine": {"version": "0.17.0", "features": ["ears"]}}),
+                load_supported_features(),
+            )
+        self.assertIn("unknown_engine", str(ctx.exception))
+        self.assertIn("Available engines", str(ctx.exception))
+
+    def test_unknown_feature_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.0", "features": ["unknown_feature"]}}),
+                load_supported_features(),
+            )
+        self.assertIn("unknown_feature", str(ctx.exception))
+        self.assertIn("publicly supported", str(ctx.exception))
+
+    def test_historical_version_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.16.9", "features": ["ears"]}}),
+                load_supported_features(),
+            )
+        self.assertIn("Historical versions are not supported", str(ctx.exception))
+
+    def test_future_version_warns_and_falls_back_to_default(self):
         captured = io.StringIO()
         orig = sys.stderr
         sys.stderr = captured
         try:
-            validate_features(
-                "myengine",
-                "1.0.0",
-                ["ears"],
-                self._version_spec(),
+            engine_name, version, features = parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.1", "features": ["ears"]}}),
+                load_supported_features(),
             )
         finally:
             sys.stderr = orig
-        self.assertEqual(captured.getvalue(), "")
 
-    def test_unknown_feature_prints_warning(self):
-        captured = io.StringIO()
-        orig = sys.stderr
-        sys.stderr = captured
-        try:
-            validate_features("myengine", "1.0.0", ["nonexistent"], self._version_spec())
-        finally:
-            sys.stderr = orig
-        self.assertIn("nonexistent", captured.getvalue())
-        self.assertIn("Warning", captured.getvalue())
-
-    def test_empty_features_list_no_warning(self):
-        captured = io.StringIO()
-        orig = sys.stderr
-        sys.stderr = captured
-        try:
-            validate_features("myengine", "1.0.0", [], self._version_spec())
-        finally:
-            sys.stderr = orig
-        self.assertEqual(captured.getvalue(), "")
-
-    def _version_spec(self):
-        return {"features": {"ears": {}, "metrics": {}}}
+        self.assertEqual(engine_name, "vllm")
+        self.assertEqual(version, "0.17.0")
+        self.assertEqual(features, ["ears"])
+        self.assertIn("newer than the highest validated version", captured.getvalue())
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +628,104 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
 
         install_engine.assert_not_called()
         self.assertEqual(calls, [("deps", True)])
+
+
+class TestInstallCliValidation(unittest.TestCase):
+
+    def test_hidden_feature_via_dry_run_rejected_before_pip(self):
+        features_json = json.dumps({
+            "vllm_ascend": {
+                "version": "0.17.0",
+                "features": ["adaptive_draft_model"],
+            }
+        })
+        captured = io.StringIO()
+
+        with patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with patch("sys.stderr", captured):
+                with patch.object(install_module, "install_runtime_dependencies") as install_runtime_dependencies:
+                    with patch.object(install_module, "install_engine") as install_engine:
+                        with patch.object(install_module.subprocess, "check_call") as check_call:
+                            with self.assertRaises(SystemExit) as ctx:
+                                install_main()
+
+        self.assertEqual(ctx.exception.code, 1)
+        install_runtime_dependencies.assert_not_called()
+        install_engine.assert_not_called()
+        check_call.assert_not_called()
+        self.assertIn("adaptive_draft_model", captured.getvalue())
+
+    def test_unknown_engine_via_check_rejected_before_pip(self):
+        features_json = json.dumps({
+            "unknown_engine": {
+                "version": "0.17.0",
+                "features": ["ears"],
+            }
+        })
+        captured = io.StringIO()
+
+        with patch("sys.argv", ["install.py", "--check", "--features", features_json]):
+            with patch("sys.stderr", captured):
+                with patch.object(install_module, "check_installed") as check_installed:
+                    with patch.object(install_module.subprocess, "check_call") as check_call:
+                        with self.assertRaises(SystemExit) as ctx:
+                            install_main()
+
+        self.assertEqual(ctx.exception.code, 1)
+        check_installed.assert_not_called()
+        check_call.assert_not_called()
+        self.assertIn("unknown_engine", captured.getvalue())
+
+    def test_public_env_hint_contains_vllm_ascend_and_parallel_spec_decode(self):
+        features_json = json.dumps({
+            "vllm_ascend": {
+                "version": "0.17.0",
+                "features": ["parallel_spec_decode"],
+            }
+        })
+        captured = io.StringIO()
+
+        with patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with patch.object(install_module, "install_runtime_dependencies"):
+                with patch("sys.stdout", captured):
+                    with self.assertRaises(SystemExit) as ctx:
+                        install_main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        output = captured.getvalue()
+        self.assertIn("WINGS_ENGINE_PATCH_OPTIONS", output)
+        self.assertIn("vllm_ascend", output)
+        self.assertIn("parallel_spec_decode", output)
+
+    def test_future_version_dry_run_warns_and_uses_fallback_version(self):
+        features_json = json.dumps({
+            "vllm": {
+                "version": "0.17.1",
+                "features": ["ears"],
+            }
+        })
+        captured_stderr = io.StringIO()
+        engine_calls = []
+
+        with patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with patch("sys.stderr", captured_stderr):
+                with patch.object(install_module, "install_runtime_dependencies"):
+                    with patch.object(
+                        install_module,
+                        "install_engine",
+                        side_effect=lambda engine_name, version, features, **kwargs: engine_calls.append(
+                            (engine_name, version, features, kwargs)
+                        ),
+                    ):
+                        with self.assertRaises(SystemExit) as ctx:
+                            install_main()
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn("newer than the highest validated version", captured_stderr.getvalue())
+        self.assertEqual(
+            engine_calls,
+            [("vllm", "0.17.0", ["ears"], {"dry_run": True})],
+        )
 
 
 if __name__ == "__main__":

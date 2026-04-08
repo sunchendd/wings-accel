@@ -34,10 +34,12 @@ Deployment layout (all files at the same level as install.py):
 from __future__ import annotations
 
 import argparse
+import functools
 import importlib.util
 import json
 import logging
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -141,11 +143,31 @@ def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, di
 def _get_packaging_version_types():
     try:
         from packaging.version import InvalidVersion, Version
-    except ImportError as exc:
-        raise RuntimeError(
-            "[wings-accel] packaging is required for version resolution. "
-            "Run `install.py --install-runtime-deps` first."
-        ) from exc
+    except ImportError:
+        @functools.total_ordering
+        class _FallbackVersion:
+            def __init__(self, version: str):
+                if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+                    raise _FallbackInvalidVersion(version)
+                parts = [int(part) for part in version.split(".")]
+                while parts and parts[-1] == 0:
+                    parts.pop()
+                self._parts = tuple(parts)
+
+            def __lt__(self, other):
+                if not isinstance(other, _FallbackVersion):
+                    return NotImplemented
+                return self._parts < other._parts
+
+            def __eq__(self, other):
+                if not isinstance(other, _FallbackVersion):
+                    return NotImplemented
+                return self._parts == other._parts
+
+        class _FallbackInvalidVersion(ValueError):
+            pass
+
+        return _FallbackVersion, _FallbackInvalidVersion
     return Version, InvalidVersion
 
 
@@ -227,25 +249,67 @@ def resolve_version(engine_name: str, requested_version: str, engine_spec: dict)
     return resolved_version, version_spec
 
 
-# ---------------------------------------------------------------------------
-# Feature validation
-# ---------------------------------------------------------------------------
+def parse_requested_install(raw_features_json: str, manifest: dict) -> tuple[str, str, list[str]]:
+    """Parse and validate a public installer request.
 
-def validate_features(
-    engine_name: str,
-    version: str,
-    requested_features: list,
-    version_spec: dict,
-) -> None:
-    """Warn (not error) when a requested feature is not in the version spec."""
-    available = set(version_spec.get("features", {}).keys())
-    unknown = set(requested_features) - available
-    if unknown:
-        stderr_logger.warning(
-            f"[wings-accel] Warning: features {sorted(unknown)} are not listed in "
-            f"{engine_name}@{version}. Available: {sorted(available)}. "
-            "Proceeding with installation anyway."
+    Returns:
+        tuple[str, str, list[str]]: (engine_name, resolved_version, requested_features)
+    """
+    try:
+        features_config = json.loads(raw_features_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"--features is not valid JSON: {exc}") from exc
+
+    if not isinstance(features_config, dict):
+        raise ValueError("--features must be a JSON object.")
+
+    if len(features_config) != 1:
+        raise ValueError("--features must contain exactly one top-level engine.")
+
+    engine_name, config = next(iter(features_config.items()))
+    if not isinstance(config, dict):
+        raise ValueError(
+            f"config for '{engine_name}' must be a JSON object with 'version' and 'features' keys."
         )
+
+    engines_spec = manifest["engines"]
+    if engine_name not in engines_spec:
+        raise ValueError(
+            f"engine '{engine_name}' is not listed in supported_features.json. "
+            f"Available engines: {list(engines_spec.keys())}"
+        )
+
+    known_engine_config_keys = {"version", "features"}
+    unknown_keys = set(config.keys()) - known_engine_config_keys
+    if unknown_keys:
+        stderr_logger.warning(
+            f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
+            f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
+        )
+
+    requested_version = config.get("version")
+    if not requested_version:
+        raise ValueError(f"'version' is required for engine '{engine_name}'.")
+
+    if "features" not in config:
+        raise ValueError(f"'features' is required for engine '{engine_name}'.")
+
+    requested_features = config["features"]
+    if not isinstance(requested_features, list):
+        raise ValueError(f"'features' for engine '{engine_name}' must be a list.")
+    if not requested_features:
+        raise ValueError(f"'features' for engine '{engine_name}' must be a non-empty list.")
+
+    resolved_version, version_spec = resolve_version(engine_name, requested_version, engines_spec[engine_name])
+    available_features = set(version_spec.get("features", {}).keys())
+    unknown_features = sorted(set(requested_features) - available_features)
+    if unknown_features:
+        raise ValueError(
+            f"features {unknown_features} are not publicly supported for "
+            f"{engine_name}@{resolved_version}. Available public features: {sorted(available_features)}."
+        )
+
+    return engine_name, resolved_version, requested_features
 
 
 # ---------------------------------------------------------------------------
@@ -671,82 +735,26 @@ Examples:
         parser.print_help()
         sys.exit(0)
 
-    # Parse --features JSON
     try:
-        features_config = json.loads(args.features)
-    except json.JSONDecodeError as e:
-        stderr_logger.error(f"[wings-accel] Error: --features is not valid JSON: {e}")
+        engine_name, resolved_version, requested_features = parse_requested_install(args.features, data)
+    except ValueError as e:
+        stderr_logger.error(f"[wings-accel] Error: {e}")
         sys.exit(1)
-
-    if not isinstance(features_config, dict):
-        stderr_logger.error("[wings-accel] Error: --features must be a JSON object.")
-        sys.exit(1)
-
-    engines_spec = data["engines"]
-    exit_code = 0
 
     if not args.check:
         install_runtime_dependencies(dry_run=args.dry_run)
 
-    for engine_name, config in features_config.items():
-        if not isinstance(config, dict):
-            stderr_logger.error(
-                f"[wings-accel] Error: config for '{engine_name}' must be a JSON object "
-                "with 'version' and optional 'features' keys."
-            )
-            sys.exit(1)
+    if args.check:
+        ok = check_installed(engine_name, resolved_version, requested_features)
+        sys.exit(0 if ok else 1)
 
-        if engine_name not in engines_spec:
-            stderr_logger.error(
-                f"[wings-accel] Error: engine '{engine_name}' is not listed in supported_features.json. "
-                f"Available engines: {list(engines_spec.keys())}"
-            )
-            sys.exit(1)
-
-        requested_version = config.get("version")
-        requested_features = config.get("features", [])
-
-        known_engine_config_keys = {"version", "features"}
-        unknown_keys = set(config.keys()) - known_engine_config_keys
-        if unknown_keys:
-            stderr_logger.warning(
-                f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
-                f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
-            )
-
-        if not requested_version:
-            stderr_logger.error(f"[wings-accel] Error: 'version' is required for engine '{engine_name}'.")
-            sys.exit(1)
-
-        if not isinstance(requested_features, list):
-            stderr_logger.error(f"[wings-accel] Error: 'features' for engine '{engine_name}' must be a list.")
-            sys.exit(1)
-
-        # Resolve version with fallback
-        try:
-            resolved_version, version_spec = resolve_version(
-                engine_name, requested_version, engines_spec[engine_name]
-            )
-        except ValueError as e:
-            stderr_logger.error(f"[wings-accel] Error: {e}")
-            sys.exit(1)
-
-        # Validate features (warn only, don't abort)
-        validate_features(engine_name, resolved_version, requested_features, version_spec)
-
-        if args.check:
-            ok = check_installed(engine_name, resolved_version, requested_features)
-            if not ok:
-                exit_code = 1
-        else:
-            install_engine(
-                engine_name,
-                resolved_version,
-                requested_features,
-                dry_run=args.dry_run,
-            )
-
-    sys.exit(exit_code)
+    install_engine(
+        engine_name,
+        resolved_version,
+        requested_features,
+        dry_run=args.dry_run,
+    )
+    sys.exit(0)
 
 
 if __name__ == "__main__":
