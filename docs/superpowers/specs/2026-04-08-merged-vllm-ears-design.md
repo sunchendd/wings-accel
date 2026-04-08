@@ -160,6 +160,13 @@ Responsibilities:
   - `vllm_ascend.compilation.acl_graph`
   - `vllm_ascend.attention.mla_v1`
 
+Owner and entry point:
+
+- owner module: `wings_engine_patch.patch_vllm_container.v0_17_0.ears_patch`
+- private entry point name: `patch_vllm_ascend_draft_compat`
+- registration point: `patch_vllm_ears()` registers post-import hooks for the three Ascend draft-related control-point modules
+- call sequence: module import -> compatibility helper patches Ascend draft-related state/behavior -> normal Ascend runner setup continues -> shared EARS sampler enablement still happens in the Ascend runner hook
+
 Interface contract:
 
 - input: the imported Ascend runtime module(s) needed for draft compatibility
@@ -216,7 +223,7 @@ The public docs should not advertise:
 - Missing `packaging` should still produce the existing explicit guidance to run `--install-runtime-deps`.
 - Missing `arctic-inference` wheel should stay non-fatal.
 - Unsupported historical versions must still fail clearly.
-- Newer unvalidated versions must still warn and fall back to the default validated patch set.
+- Newer unvalidated versions must still warn and fall back to the registry default validated patch set, which for this delivery is `vllm@0.17.0` with the same public feature selection the user requested.
 - Backend-specific hooks should remain idempotent and should not silently replace unrelated sampler state when the speculative method is unsupported or tolerance is disabled.
 - NVIDIA-only module absence in Ascend environments, and Ascend-only module absence in NVIDIA environments, must not break startup.
 - Unsupported speculative methods must leave the native sampler untouched.
@@ -254,7 +261,11 @@ The public docs should not advertise:
 
 ### Runtime validation
 
-- NVIDIA: validate install, `--check`, and auto-patch behavior in `vllm/vllm-openai:v0.17.0`
+- NVIDIA: validate in `vllm/vllm-openai:v0.17.0`
+  - package install succeeds
+  - `install.py --check` succeeds for `vllm@0.17.0` + `ears`
+  - runtime import proves the NVIDIA patch path is registered for `vllm.v1.worker.gpu_model_runner`
+  - at least one behavioral regression test proves a supported speculative method can trigger native-sampler replacement on the NVIDIA runner path
 - Ascend: validate two explicit functional targets from `/home/scd/vllm-ascend`
   - target A: branch `deepseek-ears`
   - target B: branch `deepseek-mtp`
@@ -262,6 +273,7 @@ The public docs should not advertise:
   - package install succeeds
   - `install.py --check` succeeds for `vllm@0.17.0` + `ears`
   - runtime import proves the Ascend patch path is registered for the targeted modules
+  - at least one behavioral regression test proves the Ascend draft-enabled path remains callable and that EARS sampler enablement still occurs for a supported method
 - No performance benchmark is required for Ascend draft compatibility
 
 ## Implementation Notes
@@ -286,8 +298,20 @@ Mitigation: keep manifests, registry, README, and install behavior centered on a
 
 ## Planned Work Breakdown
 
-1. Refactor patch boundaries so shared sampler logic and backend-specific hook paths are clearly separated.
-2. Merge any missing Ascend-only draft compatibility work into the unified `ears` path.
-3. Recheck install/build/docs so all public surfaces still expose only `ears`.
-4. Validate NVIDIA and Ascend runtime paths independently.
-5. Keep `sparse_kv` excluded from delivery and validation.
+### Milestone 1 - Shared delivery and runtime surface
+
+1. Keep install/build/runtime dependency behavior architecture-neutral.
+2. Keep manifests, registry, docs, and install flow limited to the single public feature `ears`.
+3. Preserve NVIDIA runtime support and validation.
+4. Keep `adaptive_draft_model` and `sparse_kv` out of the delivery surface.
+
+### Milestone 2 - Ascend compatibility integration
+
+1. Add the private `patch_vllm_ascend_draft_compat` boundary and wire its exact hook targets.
+2. Merge missing Ascend-only draft compatibility work into the unified `ears` path.
+3. Validate both Ascend reference targets (`deepseek-ears`, `deepseek-mtp`) for functional correctness.
+
+Dependency rule:
+
+- Milestone 2 depends on Milestone 1 keeping the public delivery surface stable.
+- The planning step may still live in one document, but execution should be sequenced in these two dependent chunks rather than treated as one undifferentiated batch.
