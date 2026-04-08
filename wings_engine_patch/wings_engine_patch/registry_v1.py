@@ -31,11 +31,38 @@ def _build_vllm_v0_17_0_features():
         }
     }
 
+
+def _build_vllm_ascend_v0_17_0_features():
+    from wings_engine_patch.patch_vllm_ascend_container.v0_17_0 import (
+        parallel_spec_decode_patch,
+    )
+    from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+        ears_patch,
+    )
+
+    return {
+        "features": {
+            "parallel_spec_decode": [
+                parallel_spec_decode_patch.patch_vllm_ascend_parallel_spec_decode,
+            ],
+            "ears": [
+                ears_patch.patch_vllm_ears,
+            ],
+        }
+    }
+
+
 _registered_patches = {
     'vllm': {
         "0.17.0": {
             'is_default': True,
             'builder': _build_vllm_v0_17_0_features
+        }
+    },
+    'vllm_ascend': {
+        "0.17.0": {
+            'is_default': True,
+            'builder': _build_vllm_ascend_v0_17_0_features
         }
     }
 }
