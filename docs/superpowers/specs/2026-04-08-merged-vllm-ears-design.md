@@ -1,0 +1,252 @@
+# Merged vLLM EARS Delivery Design
+
+## Problem
+
+The `feat/nvidia-ears-patch` branch currently carries part of the desired delivery:
+
+- cross-architecture install fixes for `wrapt`, `packaging`, and best-effort `arctic-inference`
+- removal of public `adaptive_draft_model`
+- public `ears` support for vLLM `0.17.0`
+- hidden `sparse_kv`
+- NVIDIA and Ascend EARS runtime patch entry points
+
+But the intended delivery is broader than the current branch state. The target is one integrated package that:
+
+1. keeps installation fixes architecture-neutral
+2. removes public `adaptive_draft_model` / SVIP dynamic length from the delivery surface
+3. exposes `ears` as the only public speculative feature
+4. keeps `sparse_kv` out of this delivery and out of validation
+5. supports vLLM on NVIDIA
+6. supports `vllm-ascend`, including Ascend-specific draft compatibility for functional correctness only, without a performance guarantee
+
+## Assumptions
+
+Because the user was unavailable during clarification, this design proceeds with these assumptions:
+
+1. The public feature surface should stay minimal and stable.
+2. `ears` remains the only public runtime feature for speculative decoding.
+3. Ascend-specific draft support is an internal compatibility path under `ears`, not a separate public feature.
+4. Validation must prove functional support on both NVIDIA and Ascend paths, but performance benchmarking is out of scope.
+
+## Goals
+
+- Deliver one package and one manifest for both NVIDIA and Ascend consumers.
+- Keep the installation story unchanged for users: one `install.py`, one wheel bundle, one `ears` feature toggle.
+- Separate shared install logic from backend-specific runtime hooks.
+- Preserve existing version-policy behavior for vLLM `0.17.0`.
+- Keep the delivery surface free of `adaptive_draft_model` and `sparse_kv`.
+
+## Non-Goals
+
+- Reintroducing `adaptive_draft_model` as a public feature.
+- Shipping or validating `sparse_kv`.
+- Optimizing Ascend draft performance.
+- Supporting additional public engine versions beyond vLLM `0.17.0`.
+- Adding separate user-facing features for backend-specific draft modes unless the user later asks for that explicitly.
+
+## Approaches Considered
+
+### Approach A - Single public feature with backend-specific internals (recommended)
+
+Expose only `ears` publicly. Inside the patch layer, split behavior into:
+
+- shared EARS sampler logic
+- NVIDIA runtime hook path
+- Ascend runtime hook path
+- Ascend draft compatibility path
+
+This keeps the user contract simple while allowing backend-specific implementation details.
+
+### Approach B - Separate public features for generic EARS and Ascend draft compatibility
+
+Expose `ears` plus a second feature such as `vllm_ascend_draft`.
+
+This makes internal boundaries visible to users, but complicates installation, manifests, and validation. It also weakens the goal of one clean delivery surface.
+
+### Approach C - Keep public `ears`, but leave Ascend draft support as undocumented implicit behavior
+
+This minimizes immediate implementation work but creates a mismatch between documented behavior and shipped behavior. It is harder to validate and maintain safely.
+
+## Recommendation
+
+Use **Approach A**.
+
+It preserves the stable user interface already established in this branch, keeps installation and documentation simple, and still gives enough implementation structure to integrate Ascend-only draft compatibility cleanly.
+
+## Proposed Architecture
+
+### 1. Shared delivery layer
+
+This layer remains architecture-neutral and covers:
+
+- `install.py`
+- `build/build.sh`
+- bundled runtime wheels (`wrapt`, `packaging`, best-effort `arctic-inference`)
+- top-level and packaged `supported_features.json`
+- public README / install instructions
+
+Responsibilities:
+
+- install runtime dependencies without forcing reinstalls in the offline local-wheel path
+- discover wheels from both flat delivery and source-tree build output
+- treat `arctic-inference` as best-effort, never as a hard blocker
+- expose only `ears` publicly
+- keep `adaptive_draft_model` and `sparse_kv` out of the public surface
+
+### 2. Shared EARS sampler layer
+
+Keep the entropy-adaptive rejection sampler implementation backend-independent.
+
+Responsibilities:
+
+- own `_SUPPORTED_EARS_METHODS = {"mtp", "eagle3", "suffix"}`
+- own lazy `torch` loading
+- own tolerance parsing and sampler replacement rules
+- avoid importing heavy engine modules at module import time
+
+This layer should not decide how the runner is reached; it should only provide the sampler and the backend-agnostic enablement predicate.
+
+### 3. NVIDIA runtime hook layer
+
+Patch `vllm.v1.worker.gpu_model_runner.GPUModelRunner`.
+
+Responsibilities:
+
+- wrap `GPUModelRunner.__init__`
+- detect whether the instantiated runner has speculative decoding enabled for a supported method
+- replace `rejection_sampler` with the EARS sampler after native runner initialization
+
+Validation target:
+
+- importing `vllm.v1.worker.gpu_model_runner` after auto-patch marks the class as patched
+- installing the package in `vllm/vllm-openai:v0.17.0` succeeds
+
+### 4. Ascend runtime hook layer
+
+Patch `vllm_ascend` runtime surfaces.
+
+Responsibilities:
+
+- register `VLLM_EARS_TOLERANCE` in `vllm_ascend.envs`
+- patch `vllm_ascend.worker.model_runner_v1.NPUModelRunner._set_up_drafter`
+- enable the EARS sampler after the native drafter setup completes
+
+Validation target:
+
+- Ascend runtime import path still patches successfully
+- existing suffix / mtp / eagle3 coverage remains green
+
+### 5. Ascend draft compatibility layer
+
+Add or preserve Ascend-only support needed for `vllm-ascend` draft behavior to function correctly under the unified `ears` feature.
+
+Responsibilities:
+
+- implement only the minimum compatibility needed for correctness
+- remain private to the Ascend path
+- avoid introducing a separate public feature unless requirements change later
+
+This compatibility layer may live in the same file initially, but the design preference is to keep it as a distinct helper or submodule so backend-specific logic stays understandable and testable.
+
+## Runtime Flow
+
+1. User installs runtime dependencies with `install.py --install-runtime-deps`.
+2. User installs the patch package with `install.py --features ... ears`.
+3. Python startup imports `wings_engine_patch._auto_patch` via `.pth`.
+4. Registry resolves `vllm@0.17.0` and enables `ears`.
+5. `patch_vllm_ears()` registers post-import hooks for:
+   - NVIDIA `GPUModelRunner`
+   - Ascend envs
+   - Ascend model runner
+   - any Ascend-only draft compatibility helper modules that need patching
+6. The first backend-specific module import triggers the matching patch path.
+7. When a runner is initialized or drafter setup completes, the shared EARS sampler layer swaps in the adaptive rejection sampler for supported methods.
+
+## Delivery Surface
+
+After integration, the public surface should be:
+
+- engine: `vllm`
+- version: `0.17.0`
+- feature: `ears`
+
+The public docs should explicitly state:
+
+- install/runtime dependency fixes are cross-architecture
+- `ears` works on NVIDIA and Ascend
+- `mtp`, `eagle3`, and `suffix` are supported
+- Ascend draft support is included for functionality, not performance
+
+The public docs should not advertise:
+
+- `adaptive_draft_model`
+- SVIP dynamic length
+- `sparse_kv`
+
+## Error Handling
+
+- Missing `packaging` should still produce the existing explicit guidance to run `--install-runtime-deps`.
+- Missing `arctic-inference` wheel should stay non-fatal.
+- Unsupported historical versions must still fail clearly.
+- Newer unvalidated versions must still warn and fall back to the default validated patch set.
+- Backend-specific hooks should remain idempotent and should not silently replace unrelated sampler state when the speculative method is unsupported or tolerance is disabled.
+
+## Testing Strategy
+
+### Unit / regression tests
+
+- install/runtime dependency tests for:
+  - `wrapt`
+  - `packaging`
+  - best-effort `arctic-inference`
+  - offline local install without `--force-reinstall`
+- manifest / registry tests proving only `ears` is public
+- EARS tests for:
+  - supported methods `mtp`, `eagle3`, `suffix`
+  - NVIDIA `GPUModelRunner` hook
+  - Ascend `NPUModelRunner` hook
+  - lazy import safety
+  - tolerance-driven sampler replacement
+- tests proving `adaptive_draft_model` remains internal-only or absent from the public surface
+- tests proving `sparse_kv` is excluded from delivery-visible manifests and install paths
+
+### Build validation
+
+- `build/build.sh` produces a flat `build/output/` delivery package
+- package contains `install.py`, `supported_features.json`, `wings_engine_patch` wheel, `wrapt`, and `packaging`
+- `arctic-inference` remains optional
+
+### Runtime validation
+
+- NVIDIA: validate install, `--check`, and auto-patch behavior in `vllm/vllm-openai:v0.17.0`
+- Ascend: validate install, `--check`, and runtime patch activation in the relevant `vllm-ascend` environment
+- No performance benchmark is required for Ascend draft compatibility
+
+## Implementation Notes
+
+- Prefer extracting backend-specific helpers from `ears_patch.py` if the file grows harder to understand.
+- Reuse the current registry / manifest / install patterns instead of introducing a new feature-dispatch mechanism.
+- Keep startup-time imports lazy to avoid regressions from eager `torch` or backend module loading.
+
+## Risks and Mitigations
+
+### Risk: backend logic becomes tangled in a single patch file
+
+Mitigation: split shared sampler code from backend-specific hook functions even if they remain in one module initially.
+
+### Risk: documentation promises more than validation proves
+
+Mitigation: document NVIDIA + Ascend functional support clearly and explicitly exclude performance guarantees for Ascend draft compatibility.
+
+### Risk: Ascend-specific draft compatibility accidentally leaks into the public feature surface
+
+Mitigation: keep manifests, registry, README, and install behavior centered on a single public feature: `ears`.
+
+## Planned Work Breakdown
+
+1. Refactor patch boundaries so shared sampler logic and backend-specific hook paths are clearly separated.
+2. Merge any missing Ascend-only draft compatibility work into the unified `ears` path.
+3. Recheck install/build/docs so all public surfaces still expose only `ears`.
+4. Validate NVIDIA and Ascend runtime paths independently.
+5. Keep `sparse_kv` excluded from delivery and validation.
+
