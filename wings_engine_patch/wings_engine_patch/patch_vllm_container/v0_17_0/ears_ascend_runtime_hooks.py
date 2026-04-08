@@ -18,7 +18,9 @@ def _patch_vllm_ascend_model_runner_module(module) -> None:
     if runner_cls is None:
         return
 
-    original_set_up_drafter = runner_cls._set_up_drafter
+    original_set_up_drafter = getattr(runner_cls, "_set_up_drafter", None)
+    if not callable(original_set_up_drafter):
+        return
     if getattr(original_set_up_drafter, "_wings_ears_patched", False):
         return
 
