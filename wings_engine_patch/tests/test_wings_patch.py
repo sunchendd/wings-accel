@@ -313,16 +313,24 @@ class TestAutoPatchModule(unittest.TestCase):
             'Expected ears startup log when auto-patching vllm_ascend',
         )
 
-    def test_auto_patch_vllm_ascend_combined_features_restores_registry_when_version_missing(self):
+    def test_auto_patch_vllm_ascend_combined_features_fails_when_registry_version_missing(self):
         original_registry = copy.deepcopy(registry_v1._registered_patches)
         missing_version_registry = copy.deepcopy(original_registry)
         missing_version_registry.setdefault('vllm_ascend', {}).pop('0.17.0', None)
-        registry_v1._registered_patches = missing_version_registry
+        expected_registry = copy.deepcopy(missing_version_registry)
+        registry_v1._registered_patches = copy.deepcopy(missing_version_registry)
         try:
-            stderr = self._run_vllm_ascend_combined_auto_patch()
-            self.assertIn(self.PARALLEL_SPEC_DECODE_LOG, stderr)
-            self.assertIn(self.EARS_LOG, stderr)
-            self.assertEqual(registry_v1._registered_patches, missing_version_registry)
+            buf = io.StringIO()
+            fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+            with patch('sys.stderr', buf):
+                with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                    self._run_auto_patch(self.ASCEND_COMBINED_OPTIONS)
+
+            stderr = buf.getvalue()
+            self.assertIn("Engine 'vllm_ascend' is not registered.", stderr)
+            self.assertNotIn(self.PARALLEL_SPEC_DECODE_LOG, stderr)
+            self.assertNotIn(self.EARS_LOG, stderr)
+            self.assertEqual(registry_v1._registered_patches, expected_registry)
         finally:
             registry_v1._registered_patches = original_registry
 
@@ -330,20 +338,8 @@ class TestAutoPatchModule(unittest.TestCase):
         buf = io.StringIO()
         fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
         # pylint: disable=protected-access
-        original_registry = copy.deepcopy(registry_v1._registered_patches)
-        working_registry = copy.deepcopy(original_registry)
-        ascend_spec = working_registry.setdefault('vllm_ascend', {}).setdefault(
-            '0.17.0',
-            {
-                'is_default': True,
-                'builder': registry_v1._build_vllm_ascend_v0_17_0_features,
-            },
-        )
-        ascend_spec.setdefault('is_default', True)
-        ascend_spec.setdefault('builder', registry_v1._build_vllm_ascend_v0_17_0_features)
-        ascend_spec.pop('features', None)
-        ascend_spec.pop('non_propagating_patches', None)
-        registry_v1._registered_patches = working_registry
+        original_registry = registry_v1._registered_patches
+        registry_v1._registered_patches = copy.deepcopy(original_registry)
         try:
             with patch('sys.stderr', buf):
                 with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
