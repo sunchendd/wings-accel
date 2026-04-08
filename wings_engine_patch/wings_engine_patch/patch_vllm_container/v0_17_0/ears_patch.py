@@ -415,6 +415,25 @@ def _read_ears_tolerance() -> float:
     return float(os.getenv("VLLM_EARS_TOLERANCE", "0.0"))
 
 
+def _maybe_enable_ears_sampler(runner) -> None:
+    spec_config = getattr(runner, "speculative_config", None)
+    method = getattr(spec_config, "method", None)
+    tolerance = _read_ears_tolerance()
+    if (
+        tolerance <= 0.0
+        or method not in _SUPPORTED_EARS_METHODS
+        or getattr(runner, "rejection_sampler", None) is None
+        or getattr(runner, "sampler", None) is None
+    ):
+        return
+    sampler_cls = _get_entropy_adaptive_rejection_sampler_class()
+    runner.rejection_sampler = sampler_cls(
+        runner.sampler,
+        base_tolerance=tolerance,
+    )
+    log_runtime_state("ears sampler enabled", method=method, base_tolerance=tolerance)
+
+
 def _patch_vllm_ascend_model_runner_module(module) -> None:
     runner_cls = getattr(module, "NPUModelRunner", None)
     if runner_cls is None:
@@ -426,25 +445,28 @@ def _patch_vllm_ascend_model_runner_module(module) -> None:
 
     def patched_set_up_drafter(self, *args, **kwargs):
         result = original_set_up_drafter(self, *args, **kwargs)
-        spec_config = getattr(self, "speculative_config", None)
-        method = getattr(spec_config, "method", None)
-        tolerance = _read_ears_tolerance()
-        if (
-            tolerance > 0.0
-            and method in _SUPPORTED_EARS_METHODS
-            and getattr(self, "rejection_sampler", None) is not None
-            and getattr(self, "sampler", None) is not None
-        ):
-            sampler_cls = _get_entropy_adaptive_rejection_sampler_class()
-            self.rejection_sampler = sampler_cls(
-                self.sampler,
-                base_tolerance=tolerance,
-            )
-            log_runtime_state("ears sampler enabled", method=method, base_tolerance=tolerance)
+        _maybe_enable_ears_sampler(self)
         return result
 
     patched_set_up_drafter._wings_ears_patched = True  # pylint: disable=protected-access
     runner_cls._set_up_drafter = patched_set_up_drafter
+
+
+def _patch_vllm_gpu_model_runner_module(module) -> None:
+    runner_cls = getattr(module, "GPUModelRunner", None)
+    if runner_cls is None:
+        return
+
+    original_init = runner_cls.__init__
+    if getattr(original_init, "_wings_ears_patched", False):
+        return
+
+    def patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        _maybe_enable_ears_sampler(self)
+
+    patched_init._wings_ears_patched = True  # pylint: disable=protected-access
+    runner_cls.__init__ = patched_init
 
 
 def patch_vllm_ears():
@@ -453,6 +475,10 @@ def patch_vllm_ears():
     _register_or_apply_post_import_hook(
         "vllm_ascend.worker.model_runner_v1",
         _patch_vllm_ascend_model_runner_module,
+    )
+    _register_or_apply_post_import_hook(
+        "vllm.v1.worker.gpu_model_runner",
+        _patch_vllm_gpu_model_runner_module,
     )
 
 

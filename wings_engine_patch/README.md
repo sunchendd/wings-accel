@@ -55,7 +55,7 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `ears` patch for `vllm` version `0.17.0`:
+To enable the `ears` patch for `vllm` version `0.17.0` on Ascend or NVIDIA:
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{

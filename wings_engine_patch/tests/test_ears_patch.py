@@ -182,3 +182,32 @@ class TestEarsPatchModule(unittest.TestCase):
         finally:
             ears_patch._get_entropy_adaptive_rejection_sampler_class = original_factory  # pylint: disable=protected-access
             sys.modules.pop("vllm_ascend.envs", None)
+
+    def test_patch_gpu_model_runner_replaces_rejection_sampler_for_nvidia(self):
+        ears_patch = _load_patch_module()
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(method="suffix")
+                self.sampler = object()
+                self.rejection_sampler = object()
+
+        fake_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        class FakeEarsSampler:
+            def __init__(self, sampler, base_tolerance):
+                self.sampler = sampler
+                self.base_tolerance = base_tolerance
+
+        original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
+        try:
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: FakeEarsSampler  # pylint: disable=protected-access
+            with unittest.mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
+                ears_patch._patch_vllm_gpu_model_runner_module(fake_module)  # pylint: disable=protected-access
+                runner = fake_module.GPUModelRunner()
+
+            self.assertTrue(getattr(fake_module.GPUModelRunner.__init__, "_wings_ears_patched", False))
+            self.assertIsInstance(runner.rejection_sampler, FakeEarsSampler)
+            self.assertEqual(runner.rejection_sampler.base_tolerance, 0.2)
+        finally:
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = original_factory  # pylint: disable=protected-access
