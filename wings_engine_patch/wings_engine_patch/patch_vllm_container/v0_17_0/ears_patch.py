@@ -3,6 +3,7 @@ import os
 import sys
 
 from .ears_ascend_compat import _ASCEND_DRAFT_COMPAT_MODULES
+from .ears_ascend_compat import _ASCEND_VLLM_COMPAT_MODULES
 from .ears_ascend_compat import patch_vllm_ascend_draft_compat as _patch_vllm_ascend_draft_compat
 
 
@@ -436,7 +437,7 @@ def patch_vllm_ears():
     from .ears_nvidia_runtime_hooks import register_nvidia_runtime_hooks
 
     log_runtime_state("ears patch enabled")
-    for module_name in _ASCEND_DRAFT_COMPAT_MODULES:
+    for module_name in _ASCEND_DRAFT_COMPAT_MODULES + _ASCEND_VLLM_COMPAT_MODULES:
         _register_or_apply_post_import_hook(module_name, patch_vllm_ascend_draft_compat)
     register_ascend_runtime_hooks(_register_or_apply_post_import_hook)
     register_nvidia_runtime_hooks(_register_or_apply_post_import_hook)
