@@ -313,12 +313,13 @@ class TestAutoPatchModule(unittest.TestCase):
             'Expected ears startup log when auto-patching vllm_ascend',
         )
 
-    def test_auto_patch_vllm_ascend_combined_features_fails_when_registry_version_missing(self):
+    def test_auto_patch_vllm_ascend_combined_features_warns_when_engine_effectively_unregistered(self):
+        """Removing the only registered Ascend version exercises the unregistered-engine path."""
         original_registry = copy.deepcopy(registry_v1._registered_patches)
-        missing_version_registry = copy.deepcopy(original_registry)
-        missing_version_registry.setdefault('vllm_ascend', {}).pop('0.17.0', None)
-        expected_registry = copy.deepcopy(missing_version_registry)
-        registry_v1._registered_patches = copy.deepcopy(missing_version_registry)
+        registry_without_ascend_versions = copy.deepcopy(original_registry)
+        registry_without_ascend_versions.setdefault('vllm_ascend', {}).pop('0.17.0', None)
+        expected_registry = copy.deepcopy(registry_without_ascend_versions)
+        registry_v1._registered_patches = copy.deepcopy(registry_without_ascend_versions)
         try:
             buf = io.StringIO()
             fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
