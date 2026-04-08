@@ -284,9 +284,9 @@ def parse_requested_install(raw_features_json: str, manifest: dict) -> tuple[str
     known_engine_config_keys = {"version", "features"}
     unknown_keys = set(config.keys()) - known_engine_config_keys
     if unknown_keys:
-        stderr_logger.warning(
-            f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
-            f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
+        raise ValueError(
+            f"unknown keys {sorted(unknown_keys)} in config for '{engine_name}'. "
+            f"Expected keys: {sorted(known_engine_config_keys)}."
         )
 
     if "version" not in config:

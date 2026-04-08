@@ -263,6 +263,23 @@ class TestParseRequestedInstall(unittest.TestCase):
         self.assertIn("unknown_feature", str(ctx.exception))
         self.assertIn("publicly supported", str(ctx.exception))
 
+    def test_unknown_engine_config_key_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps(
+                    {
+                        "vllm": {
+                            "version": "0.17.0",
+                            "features": ["ears"],
+                            "feature": ["ears"],
+                        }
+                    }
+                ),
+                load_supported_features(),
+            )
+        self.assertIn("unknown keys", str(ctx.exception))
+        self.assertIn("feature", str(ctx.exception))
+
     def test_historical_version_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             parse_requested_install(
@@ -601,43 +618,6 @@ class TestExpandFeaturesBySharedPatches(unittest.TestCase):  # pylint: disable=p
         }
 
 
-# ---------------------------------------------------------------------------
-# Unknown key warning in --features config
-# ---------------------------------------------------------------------------
-
-class TestUnknownEngineConfigKeys(unittest.TestCase):
-    """
-    When --features JSON contains unexpected keys (e.g. 'feature' instead of
-    'features'), a warning should be printed to stderr so the user notices the typo.
-    This test exercises the warning path indirectly by simulating the main() argument
-    parsing with patched sys.argv.
-    """
-
-    def test_typo_feature_key_warns(self):
-        # 'feature' instead of 'features' — should warn
-        output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.17.0", "feature": ["ears"]}}'
-        )
-        self.assertIn("unknown keys", output.lower())
-        self.assertIn("feature", output)
-
-    def test_correct_keys_no_warning(self):
-        output = self._run_main_capture_stderr(
-            '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-        )
-        self.assertNotIn("unknown keys", output.lower())
-
-    def _run_main_capture_stderr(self, features_json: str) -> str:
-        import unittest.mock as mock
-        from contextlib import suppress
-        captured = io.StringIO()
-        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
-            with mock.patch("sys.stderr", captured):
-                with suppress(SystemExit):  # pylint: disable=avoid-using-exit
-                    install_main()
-        return captured.getvalue()
-
-
 class TestRuntimeDependencyInstallFlow(unittest.TestCase):
 
     def test_main_installs_runtime_dependencies_before_engine_install(self):
@@ -737,6 +717,21 @@ class TestInstallCliValidation(unittest.TestCase):
             json.dumps({"vllm": {"features": ["ears"]}})
         )
         self.assertIn("'version' is required", output)
+
+    def test_unknown_engine_config_key_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps(
+                {
+                    "vllm": {
+                        "version": "0.17.0",
+                        "features": ["ears"],
+                        "feature": ["ears"],
+                    }
+                }
+            )
+        )
+        self.assertIn("unknown keys", output)
+        self.assertIn("feature", output)
 
     def test_missing_features_rejected_before_pip(self):
         output = self._assert_cli_rejects_without_pip(
