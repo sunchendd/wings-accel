@@ -262,12 +262,26 @@ def _find_local_whl() -> Path | None:
     return None
 
 
+def _normalize_machine_arch(machine: str) -> str:
+    normalized = machine.lower()
+    if normalized in {"x86_64", "amd64"}:
+        return "x86_64"
+    if normalized in {"aarch64", "arm64"}:
+        return "aarch64"
+    return normalized
+
+
 def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
     for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
         if not search_dir.exists():
             continue
 
         matches = list(search_dir.glob(f"{prefix}-*.whl"))
+        if prefix == "wrapt" and matches:
+            current_arch = _normalize_machine_arch(platform.machine())
+            arch_matches = [wheel for wheel in matches if current_arch in wheel.name]
+            if arch_matches:
+                matches = arch_matches
         if matches:
             return max(matches, key=lambda p: p.stat().st_mtime)
     return None

@@ -3,6 +3,7 @@ import sys
 from contextlib import suppress
 
 import install as install_module
+import pytest
 
 
 def test_find_local_whl_prefers_flat_delivery_dir(tmp_path, monkeypatch):
@@ -34,6 +35,31 @@ def test_find_local_runtime_dep_wheel_in_flat_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
 
     assert install_module._find_local_wheel_by_prefix("wrapt") == wrapt_wheel  # pylint: disable=protected-access
+
+
+@pytest.mark.parametrize(
+    ("machine_arch", "expected_name"),
+    [
+        ("x86_64", "wrapt-2.1.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.whl"),
+        ("aarch64", "wrapt-2.1.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"),
+    ],
+)
+def test_find_local_wrapt_wheel_matches_current_architecture_when_multiple_arch_wheels_exist(
+    tmp_path, monkeypatch, machine_arch, expected_name
+):
+    wrapt_x86_wheel = tmp_path / "wrapt-2.1.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.whl"
+    wrapt_aarch64_wheel = (
+        tmp_path / "wrapt-2.1.2-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl"
+    )
+    wrapt_x86_wheel.write_text("wheel", encoding="utf-8")
+    wrapt_aarch64_wheel.write_text("wheel", encoding="utf-8")
+    wrapt_aarch64_wheel.touch()
+
+    monkeypatch.setattr(install_module, "_BASE_DIR", tmp_path)
+    monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
+    monkeypatch.setattr(install_module.platform, "machine", lambda: machine_arch)
+
+    assert install_module._find_local_wheel_by_prefix("wrapt").name == expected_name  # pylint: disable=protected-access
 
 
 def test_find_local_runtime_dep_wheel_in_build_output(tmp_path, monkeypatch):
