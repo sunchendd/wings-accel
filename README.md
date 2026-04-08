@@ -65,7 +65,7 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
-| vllm | 0.17.0 | ears | 为 Ascend / NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
+| vllm | 0.17.0 | ears | 为 Ascend / NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样 |
 
 ## CLI 参考
 

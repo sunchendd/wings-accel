@@ -118,6 +118,10 @@ class TestWingsPatchMechanism(unittest.TestCase):
         failures = registry_v1.enable('nonexistent_engine', ['feat'], version='1.0.0')
         self.assertEqual(failures, [])
 
+    def test_public_registry_builder_keeps_ears_only(self):
+        feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
+        self.assertEqual(list(feature_map.keys()), ["ears"])
+
 
 class TestAutoPatchModule(unittest.TestCase):
     """Unit tests for _auto_patch.py boot-time logic via importlib.reload."""
