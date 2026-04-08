@@ -74,7 +74,10 @@ def _patch_eagle_proposer_module(module) -> None:
 
     import inspect
 
-    source = inspect.getsource(original_method)
+    try:
+        source = inspect.getsource(original_method)
+    except (OSError, TypeError):
+        return
     # Only patch if the bug is present (hardcoded vllm_config reference)
     if "self.vllm_config.model_config.max_model_len" not in source:
         return
