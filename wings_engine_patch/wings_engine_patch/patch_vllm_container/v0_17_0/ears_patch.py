@@ -452,34 +452,16 @@ def _patch_vllm_ascend_model_runner_module(module) -> None:
     runner_cls._set_up_drafter = patched_set_up_drafter
 
 
-def _patch_vllm_gpu_model_runner_module(module) -> None:
-    runner_cls = getattr(module, "GPUModelRunner", None)
-    if runner_cls is None:
-        return
-
-    original_init = runner_cls.__init__
-    if getattr(original_init, "_wings_ears_patched", False):
-        return
-
-    def patched_init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
-        _maybe_enable_ears_sampler(self)
-
-    patched_init._wings_ears_patched = True  # pylint: disable=protected-access
-    runner_cls.__init__ = patched_init
-
-
 def patch_vllm_ears():
+    from .ears_nvidia_runtime_hooks import register_nvidia_runtime_hooks
+
     log_runtime_state("ears patch enabled")
     _register_or_apply_post_import_hook("vllm_ascend.envs", _patch_vllm_ascend_envs_module)
     _register_or_apply_post_import_hook(
         "vllm_ascend.worker.model_runner_v1",
         _patch_vllm_ascend_model_runner_module,
     )
-    _register_or_apply_post_import_hook(
-        "vllm.v1.worker.gpu_model_runner",
-        _patch_vllm_gpu_model_runner_module,
-    )
+    register_nvidia_runtime_hooks(_register_or_apply_post_import_hook)
 
 
 _configure_logger()

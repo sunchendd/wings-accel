@@ -16,6 +16,8 @@ def __getattr__(name):
         return import_module(f"{__name__}.adaptive_draft_model_patch")
     if name == "ears_patch":
         return import_module(f"{__name__}.ears_patch")
+    if name == "ears_nvidia_runtime_hooks":
+        return import_module(f"{__name__}.ears_nvidia_runtime_hooks")
     if name == "sparse_kv_patch":
         return import_module(f"{__name__}.sparse_kv_patch")
     if name == "patch_vllm_adaptive_draft_model":
