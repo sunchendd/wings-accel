@@ -1,3 +1,4 @@
+import importlib
 import os
 import sys
 import types
@@ -24,9 +25,11 @@ def _purge_wings_engine_patch_modules():
 
 def _load_ascend_compat_modules():
     _purge_wings_engine_patch_modules()
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_ascend_compat
     from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
     from wings_engine_patch.patch_vllm_container.v0_17_0 import patch_vllm_ascend_draft_compat
+    ears_ascend_compat = importlib.import_module(
+        "wings_engine_patch.patch_vllm_container.v0_17_0.ears_ascend_compat"
+    )
 
     return ears_patch, ears_ascend_compat, patch_vllm_ascend_draft_compat
 
@@ -46,6 +49,14 @@ def _registered_hooks(ears_patch):
 
 
 class TestEarsAscendCompat(unittest.TestCase):
+    def test_package_does_not_expose_private_ascend_compat_module(self):
+        _purge_wings_engine_patch_modules()
+        package = importlib.import_module("wings_engine_patch.patch_vllm_container.v0_17_0")
+
+        self.assertNotIn("ears_ascend_compat", package.__all__)
+        with self.assertRaises(AttributeError):
+            getattr(package, "ears_ascend_compat")
+
     def test_patch_helper_returns_none_for_target_module(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
         module = types.SimpleNamespace(__name__="vllm_ascend.ascend_forward_context", _EXTRA_CTX=types.SimpleNamespace(extra_attrs=()))

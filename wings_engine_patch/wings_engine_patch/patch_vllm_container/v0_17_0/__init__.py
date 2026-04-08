@@ -3,7 +3,6 @@ from importlib import import_module
 
 __all__ = [
     "adaptive_draft_model_patch",
-    "ears_ascend_compat",
     "ears_ascend_runtime_hooks",
     "ears_patch",
     "patch_vllm_adaptive_draft_model",
@@ -17,8 +16,6 @@ __all__ = [
 def __getattr__(name):
     if name == "adaptive_draft_model_patch":
         return import_module(f"{__name__}.adaptive_draft_model_patch")
-    if name == "ears_ascend_compat":
-        return import_module(f"{__name__}.ears_ascend_compat")
     if name == "ears_ascend_runtime_hooks":
         return import_module(f"{__name__}.ears_ascend_runtime_hooks")
     if name == "ears_patch":
