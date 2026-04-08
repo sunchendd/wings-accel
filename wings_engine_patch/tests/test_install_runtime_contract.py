@@ -95,6 +95,27 @@ def test_offline_local_wheel_install_does_not_force_reinstall(monkeypatch, tmp_p
     assert "--force-reinstall" not in " ".join(cmd)
 
 
+def test_local_feature_wheel_install_does_not_force_reinstall(monkeypatch, tmp_path):
+    wheel_path = tmp_path / "feature-dependency-1.0.0-py3-none-any.whl"
+    wheel_path.write_text("wheel", encoding="utf-8")
+    commands = []
+
+    monkeypatch.setattr(
+        install_module,
+        "_FEATURE_LOCAL_WHEELS",
+        {"ears": ("feature-dependency", wheel_path)},
+        raising=False,
+    )
+    monkeypatch.setattr(install_module.subprocess, "check_call", lambda cmd: commands.append(cmd))
+
+    install_module._install_local_feature_wheels(["ears"])  # pylint: disable=protected-access
+
+    assert commands
+    assert commands[0][:4] == [sys.executable, "-m", "pip", "install"]
+    assert str(wheel_path) in commands[0]
+    assert "--force-reinstall" not in commands[0]
+
+
 def test_future_vllm_version_warns_and_preserves_requested_public_features(monkeypatch):
     calls = []
     captured_stderr = io.StringIO()

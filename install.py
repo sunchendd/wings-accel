@@ -78,6 +78,8 @@ _ENGINE_TO_EXTRAS = {
     "vllm": "vllm",
 }
 
+_FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {}
+
 
 # ---------------------------------------------------------------------------
 # supported_features.json helpers
@@ -288,10 +290,8 @@ def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
 
 
 def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:
-    feature_wheels = {}
-
     for feature_name in features:
-        package_name, wheel_path = feature_wheels.get(feature_name, (None, None))
+        package_name, wheel_path = _FEATURE_LOCAL_WHEELS.get(feature_name, (None, None))
         if package_name is None:
             continue
         if wheel_path is None:
@@ -300,7 +300,7 @@ def _install_local_feature_wheels(features: list[str], dry_run: bool = False) ->
                 f"but none was found in {_LOCAL_WHEEL_DIR}."
             )
 
-        cmd = [sys.executable, "-m", "pip", "install", str(wheel_path), "--force-reinstall"]
+        cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
         if dry_run:
             logger.info("[dry-run] Would run: %s", " ".join(str(c) for c in cmd))
             continue
