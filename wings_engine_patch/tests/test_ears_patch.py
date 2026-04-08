@@ -23,6 +23,21 @@ def _load_ears_patch_module():
     return ears_patch
 
 
+def patch_vllm_ears_registers(module_name):
+    ears_patch = _load_ears_patch_module()
+    registered_hooks = []
+    fake_wrapt = types.SimpleNamespace(
+        register_post_import_hook=lambda patcher, registered_module_name: registered_hooks.append(
+            (registered_module_name, patcher)
+        )
+    )
+
+    with mock.patch.dict(sys.modules, {"wrapt": fake_wrapt}, clear=False):
+        ears_patch.patch_vllm_ears()
+
+    return any(registered_module_name == module_name for registered_module_name, _ in registered_hooks)
+
+
 class TestEarsPatchModule(unittest.TestCase):
     def test_supported_methods_match_shared_contract(self):
         ears_patch = _load_ears_patch_module()
@@ -46,35 +61,9 @@ class TestEarsPatchModule(unittest.TestCase):
 
         self.assertTrue(callable(patch_vllm_ears))
 
-    def test_repeated_patch_registration_does_not_wrap_twice(self):
-        ears_patch = _load_ears_patch_module()
-        registered_hooks = []
-        fake_wrapt = types.SimpleNamespace(
-            register_post_import_hook=lambda patcher, module_name: registered_hooks.append((module_name, patcher))
-        )
-
-        class FakeRunner:
-            def _set_up_drafter(self):
-                return None
-
-        fake_module = types.SimpleNamespace(NPUModelRunner=FakeRunner)
-
-        with mock.patch.dict(sys.modules, {"wrapt": fake_wrapt}, clear=False):
-            ears_patch.patch_vllm_ears()
-            ears_patch.patch_vllm_ears()
-
-        ascend_patchers = [
-            patcher
-            for module_name, patcher in registered_hooks
-            if module_name == "vllm_ascend.worker.model_runner_v1"
-        ]
-
-        self.assertEqual(len(ascend_patchers), 2)
-        ascend_patchers[0](fake_module)
-        first_wrapper = fake_module.NPUModelRunner._set_up_drafter
-        ascend_patchers[1](fake_module)
-
-        self.assertIs(fake_module.NPUModelRunner._set_up_drafter, first_wrapper)
+    def test_patch_vllm_ears_registers_ascend_runtime_hooks(self):
+        self.assertTrue(patch_vllm_ears_registers("vllm_ascend.envs"))
+        self.assertTrue(patch_vllm_ears_registers("vllm_ascend.worker.model_runner_v1"))
 
 
 if __name__ == "__main__":

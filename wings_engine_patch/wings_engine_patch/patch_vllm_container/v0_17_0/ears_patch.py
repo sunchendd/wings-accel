@@ -398,16 +398,6 @@ def _register_or_apply_post_import_hook(module_name, patcher) -> None:
     wrapt.register_post_import_hook(patcher, module_name)
 
 
-def _patch_vllm_ascend_envs_module(module) -> None:
-    env_variables = getattr(module, "env_variables", None)
-    if not isinstance(env_variables, dict):
-        return
-    env_variables.setdefault(
-        "VLLM_EARS_TOLERANCE",
-        lambda: float(os.getenv("VLLM_EARS_TOLERANCE", "0.0")),
-    )
-
-
 def _read_ears_tolerance() -> float:
     envs_module = sys.modules.get("vllm_ascend.envs")
     if envs_module is not None and hasattr(envs_module, "VLLM_EARS_TOLERANCE"):
@@ -434,33 +424,12 @@ def _maybe_enable_ears_sampler(runner) -> None:
     log_runtime_state("ears sampler enabled", method=method, base_tolerance=tolerance)
 
 
-def _patch_vllm_ascend_model_runner_module(module) -> None:
-    runner_cls = getattr(module, "NPUModelRunner", None)
-    if runner_cls is None:
-        return
-
-    original_set_up_drafter = runner_cls._set_up_drafter
-    if getattr(original_set_up_drafter, "_wings_ears_patched", False):
-        return
-
-    def patched_set_up_drafter(self, *args, **kwargs):
-        result = original_set_up_drafter(self, *args, **kwargs)
-        _maybe_enable_ears_sampler(self)
-        return result
-
-    patched_set_up_drafter._wings_ears_patched = True  # pylint: disable=protected-access
-    runner_cls._set_up_drafter = patched_set_up_drafter
-
-
 def patch_vllm_ears():
+    from .ears_ascend_runtime_hooks import register_ascend_runtime_hooks
     from .ears_nvidia_runtime_hooks import register_nvidia_runtime_hooks
 
     log_runtime_state("ears patch enabled")
-    _register_or_apply_post_import_hook("vllm_ascend.envs", _patch_vllm_ascend_envs_module)
-    _register_or_apply_post_import_hook(
-        "vllm_ascend.worker.model_runner_v1",
-        _patch_vllm_ascend_model_runner_module,
-    )
+    register_ascend_runtime_hooks(_register_or_apply_post_import_hook)
     register_nvidia_runtime_hooks(_register_or_apply_post_import_hook)
 
 
