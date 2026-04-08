@@ -19,7 +19,7 @@ The --features JSON format:
     }
 
 Example:
-    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
 
 Deployment layout (all files at the same level as install.py):
     install.py
@@ -34,10 +34,10 @@ import argparse
 import importlib.util
 import json
 import logging
+import platform
 import subprocess
 import sys
 from pathlib import Path
-from packaging.version import InvalidVersion, Version
 
 
 class _StreamProxy:
@@ -71,7 +71,7 @@ _BASE_DIR = Path(__file__).resolve().parent
 _SUPPORTED_FEATURES_PATH = _BASE_DIR / "supported_features.json"
 # Deployment layout: all files (whl, source tarballs) sit next to install.py.
 # Source-tree fallback: build/output/ (used during local development).
-_LOCAL_WHEEL_DIR = _BASE_DIR
+_LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "build" / "output"
 
 # Map engine names to pyproject.toml [optional-dependencies] extras keys.
 _ENGINE_TO_EXTRAS = {
@@ -135,8 +135,20 @@ def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, di
     )
 
 
-def _parse_supported_versions(engine_name: str, versions: dict) -> list[tuple[Version, str, dict]]:
-    parsed_versions: list[tuple[Version, str, dict]] = []
+def _get_packaging_version_types():
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError as exc:
+        raise RuntimeError(
+            "[wings-accel] packaging is required for version resolution. "
+            "Run `install.py --install-runtime-deps` first."
+        ) from exc
+    return Version, InvalidVersion
+
+
+def _parse_supported_versions(engine_name: str, versions: dict) -> list[tuple[object, str, dict]]:
+    Version, InvalidVersion = _get_packaging_version_types()
+    parsed_versions: list[tuple[object, str, dict]] = []
     for version_str, spec in versions.items():
         try:
             parsed_versions.append((Version(version_str), version_str, spec))
@@ -154,6 +166,7 @@ def _classify_requested_version(
     requested_version: str,
     versions: dict,
 ) -> tuple[str, str, dict]:
+    Version, InvalidVersion = _get_packaging_version_types()
     if requested_version in versions:
         return "exact", requested_version, versions[requested_version]
 
@@ -241,7 +254,7 @@ def _find_local_whl() -> Path | None:
 
     Falls back to build/output/ for local development (source-tree layout).
     """
-    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR / "build" / "output"):
+    for search_dir in (_BASE_DIR, _LOCAL_WHEEL_DIR):
         if search_dir.exists():
             whls = [p for p in search_dir.glob("*.whl") if "wings_engine_patch" in p.name]
             if whls:
@@ -250,19 +263,18 @@ def _find_local_whl() -> Path | None:
 
 
 def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
-    if not _LOCAL_WHEEL_DIR.exists():
-        return None
+    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
+        if not search_dir.exists():
+            continue
 
-    matches = list(_LOCAL_WHEEL_DIR.glob(f"{prefix}-*.whl"))
-    if not matches:
-        return None
-    return max(matches, key=lambda p: p.stat().st_mtime)
+        matches = list(search_dir.glob(f"{prefix}-*.whl"))
+        if matches:
+            return max(matches, key=lambda p: p.stat().st_mtime)
+    return None
 
 
 def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:
-    feature_wheels = {
-        "sparse_kv": ("vsparse", _find_local_wheel_by_prefix("vsparse")),
-    }
+    feature_wheels = {}
 
     for feature_name in features:
         package_name, wheel_path = feature_wheels.get(feature_name, (None, None))
@@ -295,32 +307,92 @@ def _install_local_feature_wheels(features: list[str], dry_run: bool = False) ->
             raise
 
 
-def _has_local_runtime_deps() -> bool:
-    return all(
-        importlib.util.find_spec(module_name) is not None
-        for module_name in ("wrapt", "packaging")
-    )
-
-
 def _find_arctic_inference_whl() -> Path | None:
-    """Return the arctic-inference pre-built wheel sitting next to install.py."""
-    for pattern in (
-        "arctic_inference-*.whl",
-        "arctic-inference-*.whl",
-    ):
-        matches = list(_BASE_DIR.glob(pattern))
-        if matches:
-            return max(matches, key=lambda p: p.stat().st_mtime)
+    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
+        if not search_dir.exists():
+            continue
+        for pattern in (
+            "arctic_inference-*.whl",
+            "arctic-inference-*.whl",
+        ):
+            matches = list(search_dir.glob(pattern))
+            if matches:
+                return max(matches, key=lambda p: p.stat().st_mtime)
     return None
 
 
 def _is_arctic_inference_installed() -> bool:
-    """Return True if arctic-inference is already importable in the current environment."""
+    return _is_module_available("arctic_inference")
+
+
+def _is_module_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def _has_local_runtime_deps() -> bool:
+    return _is_module_available("wrapt") and _is_module_available("packaging")
+
+
+def _install_local_dependency(
+    package_name: str,
+    module_name: str,
+    wheel_path: Path | None,
+    dry_run: bool = False,
+    *,
+    no_deps: bool = False,
+    missing_ok: bool = False,
+) -> None:
+    if _is_module_available(module_name):
+        logger.info(f"[wings-accel] {package_name} already installed, skipping.")
+        return
+
+    if wheel_path is None:
+        message = (
+            f"[wings-accel] {package_name} wheel not found in {_LOCAL_WHEEL_DIR} or {_BASE_DIR}, "
+            "skipping."
+        )
+        if dry_run:
+            logger.info(f"[dry-run] {message}")
+            return
+        if missing_ok:
+            logger.info(message)
+            return
+        raise FileNotFoundError(message)
+
+    cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
+    if no_deps:
+        cmd.append("--no-deps")
+
+    if dry_run:
+        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
+        return
+
+    logger.info(f"[wings-accel] Installing {package_name} from {wheel_path.name} ...")
     try:
-        import importlib.util
-        return importlib.util.find_spec("arctic_inference") is not None
-    except Exception:
-        return False
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as exc:
+        stderr_logger.error(
+            f"[wings-accel] Error: failed to install {package_name} (exit {exc.returncode})."
+        )
+        raise
+
+
+def install_runtime_dependencies(dry_run: bool = False) -> None:
+    runtime_dependencies = (
+        ("wrapt", "wrapt", _find_local_wheel_by_prefix("wrapt"), False),
+        ("packaging", "packaging", _find_local_wheel_by_prefix("packaging"), False),
+    )
+
+    for package_name, module_name, wheel_path, missing_ok in runtime_dependencies:
+        _install_local_dependency(
+            package_name,
+            module_name,
+            wheel_path,
+            dry_run=dry_run,
+            missing_ok=missing_ok,
+        )
+
+    _install_arctic_inference(dry_run=dry_run)
 
 
 def _install_arctic_inference(dry_run: bool = False) -> None:
@@ -330,8 +402,6 @@ def _install_arctic_inference(dry_run: bool = False) -> None:
       - arctic-inference is already installed (e.g. vllm-ascend containers ship it), or
       - the host architecture is not x86_64 (the pre-built wheel only targets x86_64).
     """
-    import platform
-
     arch = platform.machine()
     if arch != "x86_64":
         logger.info(
@@ -339,29 +409,14 @@ def _install_arctic_inference(dry_run: bool = False) -> None:
         )
         return
 
-    if _is_arctic_inference_installed():
-        logger.info("[wings-accel] arctic-inference already installed, skipping.")
-        return
-
-    whl = _find_arctic_inference_whl()
-    if whl is None:
-        logger.info("[wings-accel] arctic-inference wheel not found, skipping.")
-        return
-
-    cmd = [sys.executable, "-m", "pip", "install", str(whl), "--no-deps"]
-    if dry_run:
-        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
-        return
-
-    logger.info(f"[wings-accel] Installing arctic-inference from {whl.name} ...")
-    try:
-        subprocess.check_call(cmd)
-        logger.info("[wings-accel] ✅ arctic-inference installed.")
-    except subprocess.CalledProcessError as e:
-        stderr_logger.error(
-            f"[wings-accel] Error: arctic-inference install failed (exit {e.returncode})."
-        )
-        raise
+    _install_local_dependency(
+        "arctic-inference",
+        "arctic_inference",
+        _find_arctic_inference_whl(),
+        dry_run=dry_run,
+        no_deps=True,
+        missing_ok=True,
+    )
 
 
 def install_engine(
@@ -387,11 +442,9 @@ def install_engine(
         pkg = f"{local_whl}[{extras}]"
         local_dir = str(local_whl.parent)
         if _has_local_runtime_deps():
-            cmd = [sys.executable, "-m", "pip", "install", pkg,
-                   "--force-reinstall", "--no-deps"]
+            cmd = [sys.executable, "-m", "pip", "install", pkg, "--no-deps"]
         else:
-            cmd = [sys.executable, "-m", "pip", "install", pkg,
-                   "--force-reinstall", "--no-index", "--find-links", local_dir]
+            cmd = [sys.executable, "-m", "pip", "install", pkg, "--no-index", "--find-links", local_dir]
     else:
         pkg = f"wings_engine_patch[{extras}]"
         cmd = [sys.executable, "-m", "pip", "install", pkg]
@@ -410,8 +463,7 @@ def install_engine(
                 "[wings-accel] Offline install failed (missing dependency wheels?), "
                 "retrying with --no-deps ..."
             )
-            cmd_fallback = [sys.executable, "-m", "pip", "install", pkg,
-                            "--force-reinstall", "--no-deps"]
+            cmd_fallback = [sys.executable, "-m", "pip", "install", pkg, "--no-deps"]
             try:
                 subprocess.check_call(cmd_fallback)
             except subprocess.CalledProcessError as e2:
@@ -509,12 +561,6 @@ def check_installed(
         logger.info("  ℹ️  Patch uses lazy builder; feature declarations taken from supported_features.json")
 
     for feat in features:
-        if feat == "sparse_kv":
-            if importlib.util.find_spec("vsparse") is not None:
-                logger.info("  ✅ vsparse installed")
-            else:
-                stderr_logger.error("  ❌ vsparse not installed")
-                return False
         if not declared_features or feat in declared_features:
             logger.info(f"  ✅ Feature '{feat}' declared")
         else:
@@ -566,9 +612,9 @@ def main() -> None:
         epilog="""
 Examples:
   python install.py --list
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}' --dry-run
-  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["adaptive_draft_model"]}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}' --dry-run
+  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
 """,
     )
     parser.add_argument(
@@ -592,6 +638,11 @@ Examples:
         action="store_true",
         help="List all supported engines, versions, and features",
     )
+    parser.add_argument(
+        "--install-runtime-deps",
+        action="store_true",
+        help="Install fixed runtime dependencies only (wrapt, packaging, arctic-inference)",
+    )
     args = parser.parse_args()
 
     # Load and validate supported_features.json
@@ -605,6 +656,10 @@ Examples:
     # --list
     if args.list:
         list_features(data)
+        return
+
+    if args.install_runtime_deps:
+        install_runtime_dependencies(dry_run=args.dry_run)
         return
 
     # --features is required for all other modes
@@ -626,10 +681,8 @@ Examples:
     engines_spec = data["engines"]
     exit_code = 0
 
-    # Install arctic-inference once (before engine loop) when not in check mode.
-    # Skipped automatically when already installed (vllm-ascend ships it) or on non-x86_64.
-    if not args.check and args.features:
-        _install_arctic_inference(dry_run=args.dry_run)
+    if not args.check:
+        install_runtime_dependencies(dry_run=args.dry_run)
 
     for engine_name, config in features_config.items():
         if not isinstance(config, dict):

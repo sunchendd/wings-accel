@@ -24,12 +24,6 @@ rm -rf "${OUTPUT_DIR}" "${BUILD_DIR}" "${PKG_DIR}"
 mkdir -p "${OUTPUT_DIR}" "${BUILD_DIR}" "${PKG_DIR}"
 
 ARCH=$(uname -m)
-if [ "${ARCH}" = "x86_64" ]; then
-    echo "[wings-accel] ── Building sparsekv wheel (x86_64)..."
-    bash "${ROOT_DIR}/sparsekv/build.sh" "${PKG_DIR}"
-else
-    echo "[wings-accel] ── Skipping sparsekv wheel (not needed for ${ARCH})"
-fi
 
 cd "${ROOT_DIR}/wings_engine_patch"
 
@@ -59,12 +53,21 @@ for PLATFORM in linux_x86_64 linux_aarch64; do
         || echo "[wings-accel] Warning: could not download wrapt for ${PLATFORM} (cp${PYTHON_VER})"
 done
 
+echo "[wings-accel] ── Downloading packaging wheel..."
+pip3 download packaging \
+    --only-binary=:all: \
+    --no-deps \
+    -d "${PKG_DIR}" \
+    --quiet
+
 # ---------------------------------------------------------------------------
 # 3. Build arctic-inference wheel (x86_64 only)
 # ---------------------------------------------------------------------------
 if [ "${ARCH}" = "x86_64" ]; then
     echo "[wings-accel] ── Building arctic-inference wheel (x86_64)..."
-    bash "${ROOT_DIR}/arctic-inference/build.sh" "${PKG_DIR}"
+    if ! bash "${ROOT_DIR}/arctic-inference/build.sh" "${PKG_DIR}"; then
+        echo "[wings-accel] Warning: failed to build arctic-inference wheel; continuing without it"
+    fi
 else
     echo "[wings-accel] ── Skipping arctic-inference wheel (not needed for ${ARCH})"
 fi
@@ -72,6 +75,7 @@ fi
 cp "${BUILD_DIR}"/*.whl "${PKG_DIR}/"
 cp "${ROOT_DIR}/install.py" "${PKG_DIR}/install.py"
 cp "${ROOT_DIR}/supported_features.json" "${PKG_DIR}/supported_features.json"
+cp "${PKG_DIR}"/* "${OUTPUT_DIR}/"
 
 # ---------------------------------------------------------------------------
 # 4. Package everything into a flat tar.gz
