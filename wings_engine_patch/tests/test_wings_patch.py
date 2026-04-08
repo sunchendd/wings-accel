@@ -1,3 +1,4 @@
+import copy
 import unittest
 import sys
 import os
@@ -279,24 +280,8 @@ class TestAutoPatchModule(unittest.TestCase):
 
     def test_auto_patch_vllm_ascend_combined_features_load_cleanly(self):
         """parallel_spec_decode and ears should load together for vllm_ascend."""
-        buf = io.StringIO()
-        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
-        # pylint: disable=protected-access
-        ascend_spec = registry_v1._registered_patches['vllm_ascend']['0.17.0']
-        original_features = ascend_spec.pop('features', None)
-        original_non_propagating = ascend_spec.pop('non_propagating_patches', None)
-        try:
-            with patch('sys.stderr', buf):
-                with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
-                    self._run_auto_patch(self.ASCEND_COMBINED_OPTIONS)
-        finally:
-            if original_features is not None:
-                ascend_spec['features'] = original_features
-            if original_non_propagating is not None:
-                ascend_spec['non_propagating_patches'] = original_non_propagating
-        # pylint: enable=protected-access
+        stderr = self._run_vllm_ascend_combined_auto_patch()
 
-        stderr = buf.getvalue()
         self.assertNotIn(
             'not found in registry',
             stderr,
@@ -327,6 +312,46 @@ class TestAutoPatchModule(unittest.TestCase):
             stderr,
             'Expected ears startup log when auto-patching vllm_ascend',
         )
+
+    def test_auto_patch_vllm_ascend_combined_features_restores_registry_when_version_missing(self):
+        original_registry = copy.deepcopy(registry_v1._registered_patches)
+        missing_version_registry = copy.deepcopy(original_registry)
+        missing_version_registry.setdefault('vllm_ascend', {}).pop('0.17.0', None)
+        registry_v1._registered_patches = missing_version_registry
+        try:
+            stderr = self._run_vllm_ascend_combined_auto_patch()
+            self.assertIn(self.PARALLEL_SPEC_DECODE_LOG, stderr)
+            self.assertIn(self.EARS_LOG, stderr)
+            self.assertEqual(registry_v1._registered_patches, missing_version_registry)
+        finally:
+            registry_v1._registered_patches = original_registry
+
+    def _run_vllm_ascend_combined_auto_patch(self):
+        buf = io.StringIO()
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        # pylint: disable=protected-access
+        original_registry = copy.deepcopy(registry_v1._registered_patches)
+        working_registry = copy.deepcopy(original_registry)
+        ascend_spec = working_registry.setdefault('vllm_ascend', {}).setdefault(
+            '0.17.0',
+            {
+                'is_default': True,
+                'builder': registry_v1._build_vllm_ascend_v0_17_0_features,
+            },
+        )
+        ascend_spec.setdefault('is_default', True)
+        ascend_spec.setdefault('builder', registry_v1._build_vllm_ascend_v0_17_0_features)
+        ascend_spec.pop('features', None)
+        ascend_spec.pop('non_propagating_patches', None)
+        registry_v1._registered_patches = working_registry
+        try:
+            with patch('sys.stderr', buf):
+                with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                    self._run_auto_patch(self.ASCEND_COMBINED_OPTIONS)
+        finally:
+            registry_v1._registered_patches = original_registry
+        # pylint: enable=protected-access
+        return buf.getvalue()
 
     def test_auto_patch_future_patch_release_warns_and_falls_back(self):
         buf = io.StringIO()
