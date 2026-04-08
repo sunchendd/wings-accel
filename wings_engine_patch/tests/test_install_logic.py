@@ -264,6 +264,37 @@ class TestParseRequestedInstall(unittest.TestCase):
         self.assertEqual(features, ["ears"])
         self.assertIn("newer than the highest validated version", captured.getvalue())
 
+    def test_no_packaging_fallback_handles_historical_and_future_versions(self):
+        manifest = load_supported_features()
+        original_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "packaging.version":
+                raise ImportError("packaging unavailable")
+            if name == "packaging":
+                raise ImportError("packaging unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=fake_import):
+            with self.assertRaises(ValueError) as historical_ctx:
+                parse_requested_install(
+                    json.dumps({"vllm": {"version": "0.16.9", "features": ["ears"]}}),
+                    manifest,
+                )
+
+            captured = io.StringIO()
+            with patch("sys.stderr", captured):
+                engine_name, version, features = parse_requested_install(
+                    json.dumps({"vllm": {"version": "0.17.1", "features": ["ears"]}}),
+                    manifest,
+                )
+
+        self.assertIn("Historical versions are not supported", str(historical_ctx.exception))
+        self.assertEqual(engine_name, "vllm")
+        self.assertEqual(version, "0.17.0")
+        self.assertEqual(features, ["ears"])
+        self.assertIn("newer than the highest validated version", captured.getvalue())
+
 
 # ---------------------------------------------------------------------------
 # supported_features.json and local wheel discovery

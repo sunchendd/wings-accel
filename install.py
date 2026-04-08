@@ -140,33 +140,35 @@ def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, di
     )
 
 
+class _FallbackInvalidVersion(ValueError):
+    pass
+
+
+@functools.total_ordering
+class _FallbackVersion:
+    def __init__(self, version: str):
+        if not re.fullmatch(r"\d+(?:\.\d+)*", version):
+            raise _FallbackInvalidVersion(version)
+        parts = [int(part) for part in version.split(".")]
+        while parts and parts[-1] == 0:
+            parts.pop()
+        self._parts = tuple(parts)
+
+    def __lt__(self, other):
+        if not isinstance(other, _FallbackVersion):
+            return NotImplemented
+        return self._parts < other._parts
+
+    def __eq__(self, other):
+        if not isinstance(other, _FallbackVersion):
+            return NotImplemented
+        return self._parts == other._parts
+
+
 def _get_packaging_version_types():
     try:
         from packaging.version import InvalidVersion, Version
     except ImportError:
-        @functools.total_ordering
-        class _FallbackVersion:
-            def __init__(self, version: str):
-                if not re.fullmatch(r"\d+(?:\.\d+)*", version):
-                    raise _FallbackInvalidVersion(version)
-                parts = [int(part) for part in version.split(".")]
-                while parts and parts[-1] == 0:
-                    parts.pop()
-                self._parts = tuple(parts)
-
-            def __lt__(self, other):
-                if not isinstance(other, _FallbackVersion):
-                    return NotImplemented
-                return self._parts < other._parts
-
-            def __eq__(self, other):
-                if not isinstance(other, _FallbackVersion):
-                    return NotImplemented
-                return self._parts == other._parts
-
-        class _FallbackInvalidVersion(ValueError):
-            pass
-
         return _FallbackVersion, _FallbackInvalidVersion
     return Version, InvalidVersion
 
