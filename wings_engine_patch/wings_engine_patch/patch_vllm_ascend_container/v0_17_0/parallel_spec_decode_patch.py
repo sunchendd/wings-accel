@@ -23,7 +23,9 @@ Fix strategy:
    self.vllm_config.model_config.max_model_len with self.max_model_len.
 """
 
+import functools
 import sys
+import textwrap
 
 import wrapt
 
@@ -82,19 +84,27 @@ def _patch_eagle_proposer_module(module) -> None:
     if "self.vllm_config.model_config.max_model_len" not in source:
         return
 
-    def patched_run_merged_draft(self, *args, **kwargs):
-        # Temporarily shadow vllm_config.model_config.max_model_len with
-        # self.max_model_len so that the hardcoded references in the body
-        # of _run_merged_draft use the correct draft-model limit.
-        original_max = self.vllm_config.model_config.max_model_len
-        if self.max_model_len != original_max:
-            self.vllm_config.model_config.max_model_len = self.max_model_len
-            try:
-                return original_method(self, *args, **kwargs)
-            finally:
-                self.vllm_config.model_config.max_model_len = original_max
-        return original_method(self, *args, **kwargs)
+    patched_source = textwrap.dedent(source).replace(
+        "self.vllm_config.model_config.max_model_len",
+        "self.max_model_len",
+    )
+    if patched_source == textwrap.dedent(source):
+        return
 
+    local_namespace = {}
+    exec(  # pylint: disable=exec-used
+        patched_source,
+        original_method.__globals__,
+        local_namespace,
+    )
+    patched_run_merged_draft = local_namespace.get(original_method.__name__)
+    if patched_run_merged_draft is None:
+        return
+
+    patched_run_merged_draft = functools.update_wrapper(
+        patched_run_merged_draft,
+        original_method,
+    )
     patched_run_merged_draft._wings_parallel_spec_patched = True  # pylint: disable=protected-access
     cls._run_merged_draft = patched_run_merged_draft
 
