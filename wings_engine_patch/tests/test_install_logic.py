@@ -221,6 +221,30 @@ class TestParseRequestedInstall(unittest.TestCase):
             )
         self.assertIn("must be a non-empty list", str(ctx.exception))
 
+    def test_non_string_version_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": 170, "features": ["ears"]}}),
+                load_supported_features(),
+            )
+        self.assertIn("'version' for engine 'vllm' must be a string", str(ctx.exception))
+
+    def test_non_string_feature_rejected(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.0", "features": [123]}}),
+                load_supported_features(),
+            )
+        self.assertIn("'features' for engine 'vllm' must only contain strings", str(ctx.exception))
+
+    def test_unhashable_feature_rejected_cleanly(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_requested_install(
+                json.dumps({"vllm": {"version": "0.17.0", "features": [{"name": "ears"}]}}),
+                load_supported_features(),
+            )
+        self.assertIn("'features' for engine 'vllm' must only contain strings", str(ctx.exception))
+
     def test_unknown_engine_rejected(self):
         with self.assertRaises(ValueError) as ctx:
             parse_requested_install(
@@ -663,6 +687,24 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
 
 class TestInstallCliValidation(unittest.TestCase):
 
+    def _assert_cli_rejects_without_pip(self, features_json: str) -> str:
+        captured = io.StringIO()
+        fake_wheel = Path(PROJECT_ROOT) / "fake-package.whl"
+
+        with patch("sys.argv", ["install.py", "--features", features_json]):
+            with patch("sys.stderr", captured):
+                with patch.object(install_module, "_is_module_available", return_value=False):
+                    with patch.object(install_module, "_find_local_wheel_by_prefix", return_value=fake_wheel):
+                        with patch.object(install_module, "_find_arctic_inference_whl", return_value=fake_wheel):
+                            with patch.object(install_module.platform, "machine", return_value="x86_64"):
+                                with patch.object(install_module.subprocess, "check_call") as check_call:
+                                    with self.assertRaises(SystemExit) as ctx:
+                                        install_main()
+
+        self.assertEqual(ctx.exception.code, 1)
+        check_call.assert_not_called()
+        return captured.getvalue()
+
     def test_hidden_feature_via_dry_run_rejected_before_pip(self):
         features_json = json.dumps({
             "vllm_ascend": {
@@ -685,6 +727,40 @@ class TestInstallCliValidation(unittest.TestCase):
         install_engine.assert_not_called()
         check_call.assert_not_called()
         self.assertIn("adaptive_draft_model", captured.getvalue())
+
+    def test_malformed_json_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip('{"vllm":')
+        self.assertIn("not valid JSON", output)
+
+    def test_missing_version_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps({"vllm": {"features": ["ears"]}})
+        )
+        self.assertIn("'version' is required", output)
+
+    def test_missing_features_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps({"vllm": {"version": "0.17.0"}})
+        )
+        self.assertIn("'features' is required", output)
+
+    def test_empty_features_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps({"vllm": {"version": "0.17.0", "features": []}})
+        )
+        self.assertIn("must be a non-empty list", output)
+
+    def test_unknown_feature_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps({"vllm": {"version": "0.17.0", "features": ["unknown_feature"]}})
+        )
+        self.assertIn("unknown_feature", output)
+
+    def test_historical_version_rejected_before_pip(self):
+        output = self._assert_cli_rejects_without_pip(
+            json.dumps({"vllm": {"version": "0.16.9", "features": ["ears"]}})
+        )
+        self.assertIn("Historical versions are not supported", output)
 
     def test_unknown_engine_via_check_rejected_before_pip(self):
         features_json = json.dumps({

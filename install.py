@@ -289,7 +289,11 @@ def parse_requested_install(raw_features_json: str, manifest: dict) -> tuple[str
             f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
         )
 
-    requested_version = config.get("version")
+    if "version" not in config:
+        raise ValueError(f"'version' is required for engine '{engine_name}'.")
+    requested_version = config["version"]
+    if not isinstance(requested_version, str):
+        raise ValueError(f"'version' for engine '{engine_name}' must be a string.")
     if not requested_version:
         raise ValueError(f"'version' is required for engine '{engine_name}'.")
 
@@ -301,6 +305,8 @@ def parse_requested_install(raw_features_json: str, manifest: dict) -> tuple[str
         raise ValueError(f"'features' for engine '{engine_name}' must be a list.")
     if not requested_features:
         raise ValueError(f"'features' for engine '{engine_name}' must be a non-empty list.")
+    if any(not isinstance(feature_name, str) for feature_name in requested_features):
+        raise ValueError(f"'features' for engine '{engine_name}' must only contain strings.")
 
     resolved_version, version_spec = resolve_version(engine_name, requested_version, engines_spec[engine_name])
     available_features = set(version_spec.get("features", {}).keys())
