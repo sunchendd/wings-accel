@@ -543,6 +543,23 @@ class TestInstallEngine(unittest.TestCase):
         self.assertIn("--find-links", output)
         self.assertNotIn("--force-reinstall", output)
 
+    def test_missing_local_dependency_dry_run_shows_online_fallback_command(self):
+        captured = io.StringIO()
+
+        with patch.object(install_module, "_is_module_available", return_value=False):
+            with patch("sys.stdout", captured):
+                install_module._install_local_dependency(  # pylint: disable=protected-access
+                    "packaging",
+                    "packaging",
+                    None,
+                    dry_run=True,
+                    allow_online_fallback=True,
+                )
+
+        output = captured.getvalue()
+        self.assertIn("packaging wheel not found", output)
+        self.assertIn(f"{sys.executable} -m pip install packaging", output)
+
 
 class TestLocalRuntimeDeps(unittest.TestCase):
 

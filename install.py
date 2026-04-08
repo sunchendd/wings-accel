@@ -452,12 +452,15 @@ def _install_local_dependency(
 
     if wheel_path is None:
         message = f"[wings-accel] {package_name} wheel not found in {_LOCAL_WHEEL_DIR} or {_BASE_DIR}."
-        if dry_run:
+        if allow_online_fallback:
+            if dry_run:
+                logger.info(f"[dry-run] {message} Falling back to pip index install.")
+            else:
+                logger.warning(f"{message} Falling back to pip index install.")
+            cmd = [sys.executable, "-m", "pip", "install", package_name]
+        elif dry_run:
             logger.info(f"[dry-run] {message}")
             return
-        if allow_online_fallback:
-            logger.warning(f"{message} Falling back to pip index install.")
-            cmd = [sys.executable, "-m", "pip", "install", package_name]
         elif missing_ok:
             logger.info(f"{message} Skipping.")
             return
