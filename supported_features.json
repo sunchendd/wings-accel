@@ -14,6 +14,19 @@
             },
             "sparse_kv": {
               "description": "Enable sparse KV cache management with BMSA paged k-means clustering on vLLM 0.17.0"
+            }
+          }
+        }
+      }
+    },
+    "vllm-ascend": {
+      "description": "Ascend-specific vLLM Inference Engine",
+      "versions": {
+        "0.17.0": {
+          "is_default": true,
+          "features": {
+            "ears": {
+              "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on Ascend and NVIDIA vLLM 0.17.0"
             },
             "draft_model": {
               "description": "Enable functional draft_model speculative decoding for vllm-ascend on vLLM 0.17.0 without a performance guarantee"

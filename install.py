@@ -84,8 +84,8 @@ _FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {}
 
 _ENGINE_ALIASES = {
     "vllm": "vllm",
-    "vllm-ascend": "vllm",
-    "vllm_ascend": "vllm",
+    "vllm-ascend": "vllm-ascend",
+    "vllm_ascend": "vllm-ascend",
 }
 
 

@@ -20,7 +20,6 @@ from packaging.version import InvalidVersion, Version
 
 def _build_vllm_v0_17_0_features():
     from wings_engine_patch.patch_vllm_container.v0_17_0 import (
-        draft_model_patch,
         ears_patch,
         sparse_kv_patch,
     )
@@ -33,6 +32,21 @@ def _build_vllm_v0_17_0_features():
             "sparse_kv": [
                 sparse_kv_patch.patch_vllm_sparse_kv,
             ],
+        }
+    }
+
+
+def _build_vllm_ascend_v0_17_0_features():
+    from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+        draft_model_patch,
+        ears_patch,
+    )
+
+    return {
+        "features": {
+            "ears": [
+                ears_patch.patch_vllm_ears,
+            ],
             "draft_model": [
                 draft_model_patch.patch_vllm_draft_model,
             ],
@@ -42,8 +56,8 @@ def _build_vllm_v0_17_0_features():
 
 _ENGINE_ALIASES = {
     "vllm": "vllm",
-    "vllm-ascend": "vllm",
-    "vllm_ascend": "vllm",
+    "vllm-ascend": "vllm-ascend",
+    "vllm_ascend": "vllm-ascend",
 }
 
 
@@ -55,6 +69,12 @@ _registered_patches = {
         "0.17.0": {
             'is_default': True,
             'builder': _build_vllm_v0_17_0_features
+        }
+    },
+    'vllm-ascend': {
+        "0.17.0": {
+            'is_default': True,
+            'builder': _build_vllm_ascend_v0_17_0_features
         }
     }
 }

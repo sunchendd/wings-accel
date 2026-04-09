@@ -218,24 +218,31 @@ class TestSupportedFeatureManifest(unittest.TestCase):
 
     def test_manifest_exposes_vllm_ears_sparse_kv_and_draft_model(self):
         data = load_supported_features()
-        self.assertEqual(set(data["engines"].keys()), {"vllm"})
+        self.assertEqual(set(data["engines"].keys()), {"vllm", "vllm-ascend"})
 
         versions = data["engines"]["vllm"]["versions"]
         self.assertEqual(set(versions.keys()), {"0.17.0"})
+        ascend_versions = data["engines"]["vllm-ascend"]["versions"]
+        self.assertEqual(set(ascend_versions.keys()), {"0.17.0"})
 
         features = versions["0.17.0"]["features"]
         self.assertIn("ears", features)
         self.assertIn("sparse_kv", features)
-        self.assertIn("draft_model", features)
+        self.assertNotIn("draft_model", features)
+
+        ascend_features = ascend_versions["0.17.0"]["features"]
+        self.assertEqual(set(ascend_features.keys()), {"ears", "draft_model"})
 
     def test_manifest_public_surface_excludes_merged_private_entries(self):
         manifest_data = load_supported_features()
         version_spec = manifest_data["engines"]["vllm"]["versions"]["0.17.0"]
+        ascend_version_spec = manifest_data["engines"]["vllm-ascend"]["versions"]["0.17.0"]
 
         self.assertIn("ears", version_spec["features"])
         self.assertIn("sparse_kv", version_spec["features"])
-        self.assertNotIn("adaptive_draft_model", version_spec["features"])
-        self.assertNotIn("vllm-ascend", manifest_data["engines"])
+        self.assertNotIn("draft_model", version_spec["features"])
+        self.assertEqual(set(ascend_version_spec["features"].keys()), {"ears", "draft_model"})
+        self.assertNotIn("adaptive_draft_model", ascend_version_spec["features"])
 
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):
@@ -404,8 +411,8 @@ class TestInstallCliBootstrap(unittest.TestCase):
 
     def test_normalize_engine_name_maps_vllm_ascend_aliases(self):
         self.assertEqual(install_module.normalize_engine_name("vllm"), "vllm")
-        self.assertEqual(install_module.normalize_engine_name("vllm-ascend"), "vllm")
-        self.assertEqual(install_module.normalize_engine_name("vllm_ascend"), "vllm")
+        self.assertEqual(install_module.normalize_engine_name("vllm-ascend"), "vllm-ascend")
+        self.assertEqual(install_module.normalize_engine_name("vllm_ascend"), "vllm-ascend")
 
 
 
@@ -600,7 +607,7 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
                     with suppress(SystemExit):  # pylint: disable=avoid-using-exit
                         install_main()
 
-        self.assertEqual(calls, [("vllm", "0.17.0", ["draft_model"], True, "vllm-ascend")])
+        self.assertEqual(calls, [("vllm-ascend", "0.17.0", ["draft_model"], True, "vllm-ascend")])
 
     def test_main_preserves_requested_engine_name_in_env_hint(self):
         import unittest.mock as mock

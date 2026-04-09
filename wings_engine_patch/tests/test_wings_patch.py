@@ -118,11 +118,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
         failures = registry_v1.enable('nonexistent_engine', ['feat'], version='1.0.0')
         self.assertEqual(failures, [])
 
-    def test_public_registry_builder_exposes_ears_and_sparse_kv(self):
+    def test_public_registry_builders_split_vllm_and_ascend_features(self):
         feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
-        self.assertIn("ears", feature_map)
-        self.assertIn("sparse_kv", feature_map)
-        self.assertIn("draft_model", feature_map)
+        ascend_feature_map = registry_v1._build_vllm_ascend_v0_17_0_features()["features"]  # pylint: disable=protected-access
+        self.assertEqual(set(feature_map.keys()), {"ears", "sparse_kv"})
+        self.assertEqual(set(ascend_feature_map.keys()), {"ears", "draft_model"})
 
     def test_enable_accepts_vllm_ascend_alias(self):
         failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
@@ -133,11 +133,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
         self.assertEqual(failures, [])
 
     def test_enable_standalone_draft_model_feature(self):
-        failures = registry_v1.enable('vllm', ['draft_model'], version='0.17.0')
+        failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
         self.assertEqual(failures, [])
 
     def test_enable_ears_and_draft_model_together(self):
-        failures = registry_v1.enable('vllm', ['ears', 'draft_model'], version='0.17.0')
+        failures = registry_v1.enable('vllm-ascend', ['ears', 'draft_model'], version='0.17.0')
         self.assertEqual(failures, [])
 
 
@@ -329,7 +329,7 @@ class TestAutoPatchModule(unittest.TestCase):
             ):
                 importlib.reload(ap_mod)
 
-        self.assertEqual(calls, [("vllm", ["draft_model"], "0.17.0")])
+        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0")])
 
     def test_auto_patch_normalizes_vllm_underscore_alias_before_enable(self):
         import importlib
@@ -349,7 +349,7 @@ class TestAutoPatchModule(unittest.TestCase):
             ):
                 importlib.reload(ap_mod)
 
-        self.assertEqual(calls, [("vllm", ["draft_model"], "0.17.0")])
+        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0")])
 
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""
