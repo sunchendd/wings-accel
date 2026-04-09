@@ -1,4 +1,7 @@
+import functools
 import importlib
+import inspect
+import textwrap
 from dataclasses import dataclass
 
 
@@ -6,6 +9,8 @@ _ASCEND_DRAFT_COMPAT_MODULES = (
     "vllm_ascend.ascend_forward_context",
     "vllm_ascend.compilation.acl_graph",
     "vllm_ascend.attention.mla_v1",
+    "vllm_ascend.spec_decode.draft_proposer",
+    "vllm_ascend.spec_decode.eagle_proposer",
 )
 _ASCEND_VLLM_COMPAT_MODULES = (
     "vllm.v1.worker.gpu.spec_decode.eagle",
@@ -164,11 +169,72 @@ def _patch_vllm_worker_eagle_module(module) -> None:
     module.__dict__.setdefault("prepare_eagle_decode", prepare_eagle_decode)
 
 
+def _patch_draft_proposer_module(module) -> None:
+    cls = getattr(module, "AscendDraftModelProposer", None)
+    if cls is None:
+        return
+
+    original_init = cls.__init__
+    if getattr(original_init, "_wings_parallel_spec_patched", False):
+        return
+
+    def patched_init(self, vllm_config, device, runner=None):
+        original_init(self, vllm_config, device, runner=runner)
+        spec_cfg = getattr(vllm_config, "speculative_config", None)
+        if spec_cfg is not None:
+            draft_cfg = getattr(spec_cfg, "draft_model_config", None)
+            if draft_cfg is not None:
+                draft_max = getattr(draft_cfg, "max_model_len", None)
+                if draft_max is not None and draft_max < self.max_model_len:
+                    self.max_model_len = draft_max
+
+    patched_init._wings_parallel_spec_patched = True  # pylint: disable=protected-access
+    cls.__init__ = patched_init
+
+
+def _patch_eagle_proposer_module(module) -> None:
+    cls = getattr(module, "SpecDecodeBaseProposer", None)
+    if cls is None:
+        return
+
+    original_method = getattr(cls, "_run_merged_draft", None)
+    if original_method is None:
+        return
+    if getattr(original_method, "_wings_parallel_spec_patched", False):
+        return
+
+    try:
+        source = inspect.getsource(original_method)
+    except (OSError, TypeError):
+        return
+    if "self.vllm_config.model_config.max_model_len" not in source:
+        return
+
+    patched_source = textwrap.dedent(source).replace(
+        "self.vllm_config.model_config.max_model_len",
+        "self.max_model_len",
+    )
+    if patched_source == textwrap.dedent(source):
+        return
+
+    local_namespace = {}
+    exec(patched_source, original_method.__globals__, local_namespace)  # pylint: disable=exec-used
+    patched_run_merged_draft = local_namespace.get(original_method.__name__)
+    if patched_run_merged_draft is None:
+        return
+
+    patched_run_merged_draft = functools.update_wrapper(patched_run_merged_draft, original_method)
+    patched_run_merged_draft._wings_parallel_spec_patched = True  # pylint: disable=protected-access
+    cls._run_merged_draft = patched_run_merged_draft
+
+
 _MODULE_PATCHERS = {
     "vllm_ascend.ascend_forward_context": _patch_ascend_forward_context_module,
     "vllm_ascend.compilation.acl_graph": _patch_acl_graph_module,
     "vllm_ascend.attention.mla_v1": _patch_mla_v1_module,
     "vllm.v1.worker.gpu.spec_decode.eagle": _patch_vllm_worker_eagle_module,
+    "vllm_ascend.spec_decode.draft_proposer": _patch_draft_proposer_module,
+    "vllm_ascend.spec_decode.eagle_proposer": _patch_eagle_proposer_module,
 }
 
 
