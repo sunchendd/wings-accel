@@ -9,6 +9,7 @@ try:
 
     if env_options:
         from .registry import enable
+        from .registry_v1 import normalize_engine_name
 
         try:
             # Expected format (versioned dict):
@@ -27,7 +28,8 @@ try:
                             continue
 
                         if isinstance(features, list) and features:
-                            failures = enable(engine_key, features, version=version)
+                            canonical_engine_key = normalize_engine_name(engine_key)
+                            failures = enable(canonical_engine_key, features, version=version)
                             for patch_name, exc in failures:
                                 print(f"[Wings Engine Patch] Patch failed — {patch_name}: {exc}", file=sys.stderr)
                     else:

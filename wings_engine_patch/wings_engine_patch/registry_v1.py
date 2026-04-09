@@ -20,6 +20,7 @@ from packaging.version import InvalidVersion, Version
 
 def _build_vllm_v0_17_0_features():
     from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+        adaptive_draft_model_patch,
         ears_patch,
         sparse_kv_patch,
     )
@@ -32,8 +33,22 @@ def _build_vllm_v0_17_0_features():
             "sparse_kv": [
                 sparse_kv_patch.patch_vllm_sparse_kv,
             ],
+            "draft_model": [
+                adaptive_draft_model_patch.patch_vllm_adaptive_draft_model,
+            ],
         }
     }
+
+
+_ENGINE_ALIASES = {
+    "vllm": "vllm",
+    "vllm-ascend": "vllm",
+    "vllm_ascend": "vllm",
+}
+
+
+def normalize_engine_name(inference_engine: str) -> str:
+    return _ENGINE_ALIASES.get(inference_engine, inference_engine)
 
 _registered_patches = {
     'vllm': {
@@ -214,12 +229,13 @@ def enable(inference_engine: str, features: List[str], version: str) -> List[Tup
     """
     failures: List[Tuple[str, Exception]] = []
 
-    engine_specs = _registered_patches.get(inference_engine)
+    canonical_engine_name = normalize_engine_name(inference_engine)
+    engine_specs = _registered_patches.get(canonical_engine_name)
     if not engine_specs:
         print(f"[Wings Engine Patch] Warning: Engine '{inference_engine}' is not registered.", file=sys.stderr)
         return failures
 
-    selection = _select_version(inference_engine, version, engine_specs)
+    selection = _select_version(canonical_engine_name, version, engine_specs)
     ver_specs = selection.ver_specs
     used_version = selection.resolved_version
 

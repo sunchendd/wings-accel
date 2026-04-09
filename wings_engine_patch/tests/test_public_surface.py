@@ -15,10 +15,11 @@ import wings_engine_patch.registry_v1 as registry_v1
 
 
 class TestPublicSurface(unittest.TestCase):
-    def test_registry_builder_exposes_ears_and_sparse_kv(self):
+    def test_registry_builder_exposes_ears_sparse_kv_and_draft_model(self):
         feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
         self.assertIn("ears", feature_map)
         self.assertIn("sparse_kv", feature_map)
+        self.assertIn("draft_model", feature_map)
 
     def test_v0_17_0_package_root_keeps_ascend_helpers_private(self):
         package = import_module("wings_engine_patch.patch_vllm_container.v0_17_0")
@@ -41,6 +42,7 @@ class TestPublicSurface(unittest.TestCase):
             version_spec = manifest_data["engines"]["vllm"]["versions"]["0.17.0"]
             self.assertIn("ears", version_spec["features"])
             self.assertIn("sparse_kv", version_spec["features"])
+            self.assertIn("draft_model", version_spec["features"])
             self.assertNotIn("adaptive_draft_model", version_spec["features"])
             self.assertNotIn("vllm-ascend", manifest_data["engines"])
 

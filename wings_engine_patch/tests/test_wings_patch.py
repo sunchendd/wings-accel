@@ -122,6 +122,23 @@ class TestWingsPatchMechanism(unittest.TestCase):
         feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
         self.assertIn("ears", feature_map)
         self.assertIn("sparse_kv", feature_map)
+        self.assertIn("draft_model", feature_map)
+
+    def test_enable_accepts_vllm_ascend_alias(self):
+        failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
+        self.assertEqual(failures, [])
+
+    def test_enable_accepts_vllm_underscore_ascend_alias(self):
+        failures = registry_v1.enable('vllm_ascend', ['draft_model'], version='0.17.0')
+        self.assertEqual(failures, [])
+
+    def test_enable_standalone_draft_model_feature(self):
+        failures = registry_v1.enable('vllm', ['draft_model'], version='0.17.0')
+        self.assertEqual(failures, [])
+
+    def test_enable_ears_and_draft_model_together(self):
+        failures = registry_v1.enable('vllm', ['ears', 'draft_model'], version='0.17.0')
+        self.assertEqual(failures, [])
 
 
 class TestAutoPatchModule(unittest.TestCase):
@@ -129,6 +146,12 @@ class TestAutoPatchModule(unittest.TestCase):
 
     EARS_OPTIONS = json.dumps(
         {'vllm': {'version': '0.17.0', 'features': ['ears']}}
+    )
+    DRAFT_MODEL_ASCEND_OPTIONS = json.dumps(
+        {'vllm-ascend': {'version': '0.17.0', 'features': ['draft_model']}}
+    )
+    DRAFT_MODEL_UNDERSCORE_OPTIONS = json.dumps(
+        {'vllm_ascend': {'version': '0.17.0', 'features': ['draft_model']}}
     )
     EARS_LOG = '[wins-accel] ears patch enabled'
     EARS_WARNING = "Feature 'ears' not found in registry"
@@ -287,6 +310,46 @@ class TestAutoPatchModule(unittest.TestCase):
         self.assertIn("newer than highest validated version '0.17.0'", stderr)
         self.assertIn("Trying default patch set '0.17.0'", stderr)
         self.assertIn(self.EARS_LOG, stderr)
+
+    def test_auto_patch_normalizes_vllm_ascend_alias_before_enable(self):
+        import importlib
+        import wings_engine_patch._auto_patch as ap_mod
+
+        calls = []
+        with patch("wings_engine_patch.registry.enable") as enable_mock:
+            enable_mock.side_effect = (
+                lambda engine_name, features, version: calls.append(
+                    (engine_name, features, version)
+                ) or []
+            )
+            with patch.dict(
+                os.environ,
+                {"WINGS_ENGINE_PATCH_OPTIONS": self.DRAFT_MODEL_ASCEND_OPTIONS},
+                clear=False,
+            ):
+                importlib.reload(ap_mod)
+
+        self.assertEqual(calls, [("vllm", ["draft_model"], "0.17.0")])
+
+    def test_auto_patch_normalizes_vllm_underscore_alias_before_enable(self):
+        import importlib
+        import wings_engine_patch._auto_patch as ap_mod
+
+        calls = []
+        with patch("wings_engine_patch.registry.enable") as enable_mock:
+            enable_mock.side_effect = (
+                lambda engine_name, features, version: calls.append(
+                    (engine_name, features, version)
+                ) or []
+            )
+            with patch.dict(
+                os.environ,
+                {"WINGS_ENGINE_PATCH_OPTIONS": self.DRAFT_MODEL_UNDERSCORE_OPTIONS},
+                clear=False,
+            ):
+                importlib.reload(ap_mod)
+
+        self.assertEqual(calls, [("vllm", ["draft_model"], "0.17.0")])
 
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""

@@ -76,9 +76,21 @@ _LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "bui
 # Map engine names to pyproject.toml [optional-dependencies] extras keys.
 _ENGINE_TO_EXTRAS = {
     "vllm": "vllm",
+    "vllm-ascend": "vllm",
+    "vllm_ascend": "vllm",
 }
 
 _FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {}
+
+_ENGINE_ALIASES = {
+    "vllm": "vllm",
+    "vllm-ascend": "vllm",
+    "vllm_ascend": "vllm",
+}
+
+
+def normalize_engine_name(engine_name: str) -> str:
+    return _ENGINE_ALIASES.get(engine_name, engine_name)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +450,7 @@ def install_engine(
     version: str,
     features: list,
     dry_run: bool = False,
+    display_engine_name: str | None = None,
 ) -> None:
     """Run pip install for the given engine's extras group.
 
@@ -449,7 +462,9 @@ def install_engine(
     """
     _install_local_feature_wheels(features, dry_run=dry_run)
 
-    extras = _ENGINE_TO_EXTRAS.get(engine_name, engine_name)
+    canonical_engine_name = normalize_engine_name(engine_name)
+    extras = _ENGINE_TO_EXTRAS.get(canonical_engine_name, canonical_engine_name)
+    display_engine_name = display_engine_name or engine_name
     local_whl = _find_local_wheel_by_prefix("wings_engine_patch") or _find_local_whl()
 
     if local_whl:
@@ -465,10 +480,10 @@ def install_engine(
 
     if dry_run:
         logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
-        _print_env_hint(engine_name, version, features, dry_run=True)
+        _print_env_hint(display_engine_name, version, features, dry_run=True)
         return
 
-    logger.info(f"[wings-accel] Installing for engine '{engine_name}' (extras: [{extras}]) ...")
+    logger.info(f"[wings-accel] Installing for engine '{display_engine_name}' (extras: [{extras}]) ...")
     try:
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError as e:
@@ -489,7 +504,7 @@ def install_engine(
             stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
             raise
 
-    _print_env_hint(engine_name, version, features)
+    _print_env_hint(display_engine_name, version, features)
 
 
 def _print_env_hint(engine_name: str, version: str, features: list, dry_run: bool = False) -> None:
@@ -517,6 +532,7 @@ def check_installed(
         bool: True if all checks pass, False otherwise
     """
     logger.info(f"[wings-accel] Checking {engine_name}@{version} features: {features}")
+    canonical_engine_name = normalize_engine_name(engine_name)
 
     # 1. package installed?
     try:
@@ -530,16 +546,16 @@ def check_installed(
 
     # 2. engine registered?
     registry = getattr(reg_v1, "_registered_patches", {})
-    if engine_name not in registry:
+    if canonical_engine_name not in registry:
         stderr_logger.error(f"  ❌ Engine '{engine_name}' not found in patch registry.")
         return False
     logger.info(f"  ✅ Engine '{engine_name}' registered in patch registry")
 
     # 3. version policy
-    engine_versions = registry[engine_name]
+    engine_versions = registry[canonical_engine_name]
     try:
         resolution_kind, resolved_version, ver_spec = _classify_requested_version(
-            engine_name,
+            canonical_engine_name,
             version,
             engine_versions,
         )
@@ -699,6 +715,8 @@ Examples:
         install_runtime_dependencies(dry_run=args.dry_run)
 
     for engine_name, config in features_config.items():
+        requested_engine_name = engine_name
+        canonical_engine_name = normalize_engine_name(engine_name)
         if not isinstance(config, dict):
             stderr_logger.error(
                 f"[wings-accel] Error: config for '{engine_name}' must be a JSON object "
@@ -706,9 +724,9 @@ Examples:
             )
             sys.exit(1)
 
-        if engine_name not in engines_spec:
+        if canonical_engine_name not in engines_spec:
             stderr_logger.error(
-                f"[wings-accel] Error: engine '{engine_name}' is not listed in supported_features.json. "
+                f"[wings-accel] Error: engine '{requested_engine_name}' is not listed in supported_features.json. "
                 f"Available engines: {list(engines_spec.keys())}"
             )
             sys.exit(1)
@@ -735,25 +753,26 @@ Examples:
         # Resolve version with fallback
         try:
             resolved_version, version_spec = resolve_version(
-                engine_name, requested_version, engines_spec[engine_name]
+                canonical_engine_name, requested_version, engines_spec[canonical_engine_name]
             )
         except ValueError as e:
             stderr_logger.error(f"[wings-accel] Error: {e}")
             sys.exit(1)
 
         # Validate features (warn only, don't abort)
-        validate_features(engine_name, resolved_version, requested_features, version_spec)
+        validate_features(canonical_engine_name, resolved_version, requested_features, version_spec)
 
         if args.check:
-            ok = check_installed(engine_name, resolved_version, requested_features)
+            ok = check_installed(requested_engine_name, resolved_version, requested_features)
             if not ok:
                 exit_code = 1
         else:
             install_engine(
-                engine_name,
+                canonical_engine_name,
                 resolved_version,
                 requested_features,
                 dry_run=args.dry_run,
+                display_engine_name=requested_engine_name,
             )
 
     sys.exit(exit_code)

@@ -216,7 +216,7 @@ class TestValidateFeatures(unittest.TestCase):
 
 class TestSupportedFeatureManifest(unittest.TestCase):
 
-    def test_manifest_exposes_vllm_ears_and_sparse_kv(self):
+    def test_manifest_exposes_vllm_ears_sparse_kv_and_draft_model(self):
         data = load_supported_features()
         self.assertEqual(set(data["engines"].keys()), {"vllm"})
 
@@ -226,6 +226,7 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         features = versions["0.17.0"]["features"]
         self.assertIn("ears", features)
         self.assertIn("sparse_kv", features)
+        self.assertIn("draft_model", features)
 
     def test_manifest_public_surface_excludes_merged_private_entries(self):
         manifest_data = load_supported_features()
@@ -401,6 +402,11 @@ class TestInstallCliBootstrap(unittest.TestCase):
         with patch("builtins.__import__", side_effect=fake_import):
             self.assertFalse(install_module._has_local_runtime_deps())  # pylint: disable=protected-access
 
+    def test_normalize_engine_name_maps_vllm_ascend_aliases(self):
+        self.assertEqual(install_module.normalize_engine_name("vllm"), "vllm")
+        self.assertEqual(install_module.normalize_engine_name("vllm-ascend"), "vllm")
+        self.assertEqual(install_module.normalize_engine_name("vllm_ascend"), "vllm")
+
 
 
 
@@ -569,6 +575,52 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
 
         install_engine.assert_not_called()
         self.assertEqual(calls, [("deps", True)])
+
+    def test_main_accepts_vllm_ascend_alias(self):
+        import unittest.mock as mock
+        from contextlib import suppress
+
+        calls = []
+        features_json = '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with mock.patch.object(
+                install_module,
+                "install_runtime_dependencies",
+                side_effect=lambda dry_run=False: None,
+                create=True,
+            ):
+                with mock.patch.object(
+                    install_module,
+                    "install_engine",
+                    side_effect=lambda engine_name, version, features, dry_run=False, **kwargs: calls.append(
+                        (engine_name, version, features, dry_run, kwargs.get("display_engine_name"))
+                    ),
+                ):
+                    with suppress(SystemExit):  # pylint: disable=avoid-using-exit
+                        install_main()
+
+        self.assertEqual(calls, [("vllm", "0.17.0", ["draft_model"], True, "vllm-ascend")])
+
+    def test_main_preserves_requested_engine_name_in_env_hint(self):
+        import unittest.mock as mock
+        from contextlib import suppress
+
+        features_json = '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+        captured = io.StringIO()
+
+        with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
+            with mock.patch.object(
+                install_module,
+                "install_runtime_dependencies",
+                side_effect=lambda dry_run=False: None,
+                create=True,
+            ):
+                with patch("sys.stdout", captured):
+                    with suppress(SystemExit):  # pylint: disable=avoid-using-exit
+                        install_main()
+
+        self.assertIn('"vllm-ascend"', captured.getvalue())
 
 
 if __name__ == "__main__":

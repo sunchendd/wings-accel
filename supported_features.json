@@ -14,6 +14,9 @@
             },
             "sparse_kv": {
               "description": "Enable sparse KV cache management with BMSA paged k-means clustering on vLLM 0.17.0"
+            },
+            "draft_model": {
+              "description": "Enable functional draft_model speculative decoding for vllm-ascend on vLLM 0.17.0 without a performance guarantee"
             }
           }
         }
