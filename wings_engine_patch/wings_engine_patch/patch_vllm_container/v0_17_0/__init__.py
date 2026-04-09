@@ -3,7 +3,9 @@ from importlib import import_module
 
 __all__ = [
     "adaptive_draft_model_patch",
+    "draft_model_patch",
     "ears_patch",
+    "patch_vllm_draft_model",
     "patch_vllm_adaptive_draft_model",
     "patch_vllm_ears",
     "patch_vllm_sparse_kv",
@@ -14,6 +16,8 @@ __all__ = [
 def __getattr__(name):
     if name == "adaptive_draft_model_patch":
         return import_module(f"{__name__}.adaptive_draft_model_patch")
+    if name == "draft_model_patch":
+        return import_module(f"{__name__}.draft_model_patch")
     if name == "ears_patch":
         return import_module(f"{__name__}.ears_patch")
     if name == "ears_nvidia_runtime_hooks":
@@ -24,6 +28,10 @@ def __getattr__(name):
         from .adaptive_draft_model_patch import patch_vllm_adaptive_draft_model
 
         return patch_vllm_adaptive_draft_model
+    if name == "patch_vllm_draft_model":
+        from .draft_model_patch import patch_vllm_draft_model
+
+        return patch_vllm_draft_model
     if name == "patch_vllm_ears":
         from .ears_patch import patch_vllm_ears
 
