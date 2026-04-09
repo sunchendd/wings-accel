@@ -4,7 +4,6 @@ import tempfile
 import unittest
 import zipfile
 from unittest.mock import patch
-import tomllib
 
 
 PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -13,8 +12,13 @@ sys.path.append(PACKAGE_ROOT)
 import build_wheel
 
 
+tomllib = build_wheel._load_tomllib()  # pylint: disable=protected-access
+
+
 class TestBuildWheelHelpers(unittest.TestCase):
     def test_pyproject_declares_runtime_dependencies_needed_at_startup(self):
+        if tomllib is None:
+            self.skipTest("tomllib/tomli unavailable")
         pyproject_path = os.path.join(PACKAGE_ROOT, "pyproject.toml")
         with open(pyproject_path, "rb") as pyproject_file:
             pyproject = tomllib.load(pyproject_file)

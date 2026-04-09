@@ -10,6 +10,14 @@ FEATURES ?= {"vllm":{"version":"0.17.0","features":["ears"]}}
 
 .PHONY: all build install test check validate list clean dev-setup help
 
+DEFAULT_TESTS := \
+	$(PKG_DIR)/tests/test_build_wheel.py \
+	$(PKG_DIR)/tests/test_install_logic.py \
+	$(PKG_DIR)/tests/test_ascend_registry_contract.py \
+	$(PKG_DIR)/tests/test_wings_patch.py \
+	$(PKG_DIR)/tests/test_ears_patch.py \
+	$(PKG_DIR)/tests/test_parallel_spec_decode_patch.py
+
 all: build
 
 ## build      — 编译 whl（含 .pth 自动注入）
@@ -22,7 +30,7 @@ install: build
 
 ## test       — 运行单元测试
 test:
-	cd $(PKG_DIR) && python3 -m pytest tests/ -v --tb=short
+	python3 -m pytest $(DEFAULT_TESTS) -v --tb=short
 
 ## check      — 开发者自验证（验证已安装 patch 可调用）
 ##              用法: make check FEATURES='{"vllm_ascend":{"version":"0.17.0","features":["parallel_spec_decode","ears"]}}'
