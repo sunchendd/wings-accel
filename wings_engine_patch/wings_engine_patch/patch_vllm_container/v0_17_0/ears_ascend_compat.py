@@ -35,14 +35,35 @@ def _extend_unique(values, additions):
     return type(values)(items) if isinstance(values, tuple) else items
 
 
+def _align_hidden_states_last_dim(hidden_states, hidden_size):
+    if hidden_size is None or not hasattr(hidden_states, "shape") or hidden_states.shape[-1] == hidden_size:
+        return hidden_states
+
+    if hidden_states.shape[-1] > hidden_size:
+        return hidden_states[..., :hidden_size]
+
+    import torch.nn.functional as functional
+
+    return functional.pad(hidden_states, (0, hidden_size - hidden_states.shape[-1]))
+
+
+def _get_target_hidden_size(instance):
+    hidden_states = getattr(instance, "hidden_states", None)
+    if hasattr(hidden_states, "shape"):
+        return hidden_states.shape[-1]
+    return getattr(instance, "hidden_size", None)
+
+
 def _patch_ascend_forward_context_module(module) -> None:
     extra_ctx = getattr(module, "_EXTRA_CTX", None)
     extra_attrs = getattr(extra_ctx, "extra_attrs", None)
     if extra_ctx is None or extra_attrs is None:
         return
-    updated_attrs = _extend_unique(extra_attrs, ("draft_attn_metadatas",))
-    if updated_attrs != extra_attrs:
-        extra_ctx.extra_attrs = updated_attrs
+    attrs_holder = type(extra_ctx) if hasattr(type(extra_ctx), "extra_attrs") else extra_ctx
+    current_attrs = getattr(attrs_holder, "extra_attrs", extra_attrs)
+    updated_attrs = _extend_unique(current_attrs, ("draft_attn_metadatas",))
+    if updated_attrs != current_attrs:
+        setattr(attrs_holder, "extra_attrs", updated_attrs)
 
 
 def _patch_acl_graph_module(module) -> None:
@@ -196,6 +217,25 @@ def _patch_eagle_proposer_module(module) -> None:
     cls = getattr(module, "SpecDecodeBaseProposer", None)
     if cls is None:
         return
+
+    original_set_inputs_first_pass = getattr(cls, "set_inputs_first_pass", None)
+    if (
+        original_set_inputs_first_pass is not None
+        and not getattr(original_set_inputs_first_pass, "_wings_parallel_spec_patched", False)
+    ):
+        set_inputs_signature = inspect.signature(original_set_inputs_first_pass)
+
+        def patched_set_inputs_first_pass(self, *args, **kwargs):
+            bound = set_inputs_signature.bind(self, *args, **kwargs)
+            if "target_hidden_states" in bound.arguments:
+                bound.arguments["target_hidden_states"] = _align_hidden_states_last_dim(
+                    bound.arguments["target_hidden_states"],
+                    _get_target_hidden_size(self),
+                )
+            return original_set_inputs_first_pass(*bound.args, **bound.kwargs)
+
+        patched_set_inputs_first_pass._wings_parallel_spec_patched = True  # pylint: disable=protected-access
+        cls.set_inputs_first_pass = patched_set_inputs_first_pass
 
     original_method = getattr(cls, "_run_merged_draft", None)
     if original_method is None:

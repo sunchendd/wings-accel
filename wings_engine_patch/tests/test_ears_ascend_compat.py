@@ -125,6 +125,30 @@ class TestEarsAscendCompat(unittest.TestCase):
         self.assertIn("draft_attn_metadatas", module._EXTRA_CTX.extra_attrs)
         self.assertEqual(module._EXTRA_CTX.extra_attrs.count("draft_attn_metadatas"), 1)
 
+    def test_patch_ascend_forward_context_updates_proxy_class_attrs(self):
+        _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+
+        class FakeExtraForwardContextProxy:
+            extra_attrs = ("is_draft_model",)
+
+            def __setattr__(self, name, value):
+                if name not in self.extra_attrs:
+                    raise AttributeError(
+                        f"{name} is not extra forward context attribute, "
+                        "please get/set it from vllm's _forward_context directly."
+                    )
+                object.__setattr__(self, name, value)
+
+        module = types.SimpleNamespace(
+            __name__="vllm_ascend.ascend_forward_context",
+            _EXTRA_CTX=FakeExtraForwardContextProxy(),
+        )
+
+        ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+
+        self.assertIn("draft_attn_metadatas", type(module._EXTRA_CTX).extra_attrs)
+        self.assertEqual(type(module._EXTRA_CTX).extra_attrs.count("draft_attn_metadatas"), 1)
+
     def test_patch_acl_graph_adds_draft_graph_helpers(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
         module = types.SimpleNamespace(__name__="vllm_ascend.compilation.acl_graph", _graph_params=None)
@@ -249,6 +273,118 @@ class TestEarsAscendCompat(unittest.TestCase):
         self.assertEqual(input_buffers.seq_lens.tolist(), [4, 3, 0, 0])
         self.assertTrue(torch.equal(input_hidden_states[0], output_hidden_states[2]))
         self.assertTrue(torch.equal(input_hidden_states[1], output_hidden_states[4]))
+
+    def test_patch_eagle_proposer_pads_target_hidden_states_to_hidden_size(self):
+        _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+
+        class SpecDecodeBaseProposer:
+            def __init__(self):
+                self.hidden_size = 4
+                self.captured_target_hidden_states = None
+                self.vllm_config = types.SimpleNamespace(
+                    model_config=types.SimpleNamespace(max_model_len=16)
+                )
+
+            def _run_merged_draft(self):
+                return self.vllm_config.model_config.max_model_len
+
+            def set_inputs_first_pass(self, *, target_hidden_states, **_kwargs):
+                self.captured_target_hidden_states = target_hidden_states
+                return 0, None, None
+
+        module = types.SimpleNamespace(
+            __name__="vllm_ascend.spec_decode.eagle_proposer",
+            SpecDecodeBaseProposer=SpecDecodeBaseProposer,
+        )
+
+        ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+        proposer = module.SpecDecodeBaseProposer()
+
+        proposer.set_inputs_first_pass(
+            target_hidden_states=torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
+        )
+
+        self.assertTrue(
+            torch.equal(
+                proposer.captured_target_hidden_states,
+                torch.tensor([[1.0, 2.0, 0.0, 0.0], [3.0, 4.0, 0.0, 0.0]], dtype=torch.float32),
+            )
+        )
+
+    def test_patch_eagle_proposer_prefers_hidden_state_buffer_width_for_padding(self):
+        _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+
+        class SpecDecodeBaseProposer:
+            def __init__(self):
+                self.hidden_size = 2
+                self.hidden_states = torch.zeros((8, 4), dtype=torch.float32)
+                self.captured_target_hidden_states = None
+                self.vllm_config = types.SimpleNamespace(
+                    model_config=types.SimpleNamespace(max_model_len=16)
+                )
+
+            def _run_merged_draft(self):
+                return self.vllm_config.model_config.max_model_len
+
+            def set_inputs_first_pass(self, *, target_hidden_states, **_kwargs):
+                self.captured_target_hidden_states = target_hidden_states
+                return 0, None, None
+
+        module = types.SimpleNamespace(
+            __name__="vllm_ascend.spec_decode.eagle_proposer",
+            SpecDecodeBaseProposer=SpecDecodeBaseProposer,
+        )
+
+        ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+        proposer = module.SpecDecodeBaseProposer()
+
+        proposer.set_inputs_first_pass(
+            target_hidden_states=torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float32)
+        )
+
+        self.assertTrue(
+            torch.equal(
+                proposer.captured_target_hidden_states,
+                torch.tensor([[1.0, 2.0, 0.0, 0.0], [3.0, 4.0, 0.0, 0.0]], dtype=torch.float32),
+            )
+        )
+
+    def test_patch_eagle_proposer_truncates_target_hidden_states_to_buffer_width(self):
+        _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+
+        class SpecDecodeBaseProposer:
+            def __init__(self):
+                self.hidden_states = torch.zeros((8, 2), dtype=torch.float32)
+                self.captured_target_hidden_states = None
+                self.vllm_config = types.SimpleNamespace(
+                    model_config=types.SimpleNamespace(max_model_len=16)
+                )
+
+            def _run_merged_draft(self):
+                return self.vllm_config.model_config.max_model_len
+
+            def set_inputs_first_pass(self, *, target_hidden_states, **_kwargs):
+                self.captured_target_hidden_states = target_hidden_states
+                return 0, None, None
+
+        module = types.SimpleNamespace(
+            __name__="vllm_ascend.spec_decode.eagle_proposer",
+            SpecDecodeBaseProposer=SpecDecodeBaseProposer,
+        )
+
+        ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+        proposer = module.SpecDecodeBaseProposer()
+
+        proposer.set_inputs_first_pass(
+            target_hidden_states=torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=torch.float32)
+        )
+
+        self.assertTrue(
+            torch.equal(
+                proposer.captured_target_hidden_states,
+                torch.tensor([[1.0, 2.0], [4.0, 5.0]], dtype=torch.float32),
+            )
+        )
 
 
 if __name__ == "__main__":
