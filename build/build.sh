@@ -25,10 +25,20 @@ mkdir -p "${OUTPUT_DIR}" "${BUILD_DIR}" "${PKG_DIR}"
 
 ARCH=$(uname -m)
 
+# ---------------------------------------------------------------------------
+# 1. Build sparsekv wheel (x86_64 only)
+# ---------------------------------------------------------------------------
+if [ "${ARCH}" = "x86_64" ]; then
+    echo "[wings-accel] ── Building sparsekv wheel (x86_64)..."
+    bash "${ROOT_DIR}/sparsekv/build.sh" "${PKG_DIR}"
+else
+    echo "[wings-accel] ── Skipping sparsekv wheel (not needed for ${ARCH})"
+fi
+
 cd "${ROOT_DIR}/wings_engine_patch"
 
 # ---------------------------------------------------------------------------
-# 1. Build wings_engine_patch wheel
+# 2. Build wings_engine_patch wheel
 # ---------------------------------------------------------------------------
 echo "[wings-accel] ── Building wings_engine_patch wheel..."
 bash "${ROOT_DIR}/wings_engine_patch/build.sh" "${BUILD_DIR}"
@@ -37,7 +47,7 @@ bash "${ROOT_DIR}/wings_engine_patch/build.sh" "${BUILD_DIR}"
 cp "${BUILD_DIR}"/wings_engine_patch-*.whl "${PKG_DIR}/"
 
 # ---------------------------------------------------------------------------
-# 2. Download wrapt wheels (x86_64 + aarch64) for offline installation
+# 3. Download wrapt wheels (x86_64 + aarch64) for offline installation
 # ---------------------------------------------------------------------------
 echo "[wings-accel] ── Downloading wrapt wheels (x86_64 + aarch64)..."
 for PLATFORM in linux_x86_64 linux_aarch64; do
@@ -61,7 +71,7 @@ pip3 download packaging \
     --quiet
 
 # ---------------------------------------------------------------------------
-# 3. Build arctic-inference wheel (x86_64 only)
+# 4. Build arctic-inference wheel (x86_64 only)
 # ---------------------------------------------------------------------------
 if [ "${ARCH}" = "x86_64" ]; then
     echo "[wings-accel] ── Building arctic-inference wheel (x86_64)..."
@@ -78,7 +88,7 @@ cp "${ROOT_DIR}/supported_features.json" "${PKG_DIR}/supported_features.json"
 cp "${PKG_DIR}"/* "${OUTPUT_DIR}/"
 
 # ---------------------------------------------------------------------------
-# 4. Package everything into a flat tar.gz
+# 5. Package everything into a flat tar.gz
 # ---------------------------------------------------------------------------
 echo "[wings-accel] ── Packaging delivery archive..."
 tar zcf "${OUTPUT_DIR}/wings-accel-package.tar.gz" -C "${PKG_DIR}" .

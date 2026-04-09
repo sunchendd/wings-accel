@@ -78,8 +78,6 @@ _ENGINE_TO_EXTRAS = {
     "vllm": "vllm",
 }
 
-_FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {}
-
 
 # ---------------------------------------------------------------------------
 # supported_features.json helpers
@@ -287,6 +285,11 @@ def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
         if matches:
             return max(matches, key=lambda p: p.stat().st_mtime)
     return None
+
+
+_FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {
+    "sparse_kv": ("vsparse", _find_local_wheel_by_prefix("vsparse")),
+}
 
 
 def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:
@@ -575,6 +578,12 @@ def check_installed(
         logger.info("  ℹ️  Patch uses lazy builder; feature declarations taken from supported_features.json")
 
     for feat in features:
+        if feat == "sparse_kv":
+            if importlib.util.find_spec("vsparse") is not None:
+                logger.info("  ✅ vsparse installed")
+            else:
+                stderr_logger.error("  ❌ vsparse not installed")
+                return False
         if not declared_features or feat in declared_features:
             logger.info(f"  ✅ Feature '{feat}' declared")
         else:
