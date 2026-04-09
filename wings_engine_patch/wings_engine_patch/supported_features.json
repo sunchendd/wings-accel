@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "updated_at": "2026-04-08",
+  "updated_at": "2026-04-09",
   "description": "Registry of supported inference engines and their patch capabilities provided by wings-accel.",
   "engines": {
     "vllm": {
@@ -11,6 +11,9 @@
           "features": {
             "ears": {
               "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on Ascend and NVIDIA vLLM 0.17.0"
+            },
+            "sparse_kv": {
+              "description": "Enable sparse KV cache management with BMSA paged k-means clustering on vLLM 0.17.0"
             }
           }
         }

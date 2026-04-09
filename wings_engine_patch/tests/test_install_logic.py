@@ -216,7 +216,7 @@ class TestValidateFeatures(unittest.TestCase):
 
 class TestSupportedFeatureManifest(unittest.TestCase):
 
-    def test_manifest_only_exposes_vllm_ears(self):
+    def test_manifest_exposes_vllm_ears_and_sparse_kv(self):
         data = load_supported_features()
         self.assertEqual(set(data["engines"].keys()), {"vllm"})
 
@@ -224,15 +224,16 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(set(versions.keys()), {"0.17.0"})
 
         features = versions["0.17.0"]["features"]
-        self.assertEqual(set(features.keys()), {"ears"})
+        self.assertIn("ears", features)
+        self.assertIn("sparse_kv", features)
 
     def test_manifest_public_surface_excludes_merged_private_entries(self):
         manifest_data = load_supported_features()
         version_spec = manifest_data["engines"]["vllm"]["versions"]["0.17.0"]
 
         self.assertIn("ears", version_spec["features"])
+        self.assertIn("sparse_kv", version_spec["features"])
         self.assertNotIn("adaptive_draft_model", version_spec["features"])
-        self.assertNotIn("sparse_kv", version_spec["features"])
         self.assertNotIn("vllm-ascend", manifest_data["engines"])
 
 

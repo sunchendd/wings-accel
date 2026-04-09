@@ -118,9 +118,10 @@ class TestWingsPatchMechanism(unittest.TestCase):
         failures = registry_v1.enable('nonexistent_engine', ['feat'], version='1.0.0')
         self.assertEqual(failures, [])
 
-    def test_public_registry_builder_keeps_ears_only(self):
+    def test_public_registry_builder_exposes_ears_and_sparse_kv(self):
         feature_map = registry_v1._build_vllm_v0_17_0_features()["features"]  # pylint: disable=protected-access
-        self.assertEqual(list(feature_map.keys()), ["ears"])
+        self.assertIn("ears", feature_map)
+        self.assertIn("sparse_kv", feature_map)
 
 
 class TestAutoPatchModule(unittest.TestCase):
