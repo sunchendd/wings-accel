@@ -223,26 +223,40 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         versions = data["engines"]["vllm"]["versions"]
         self.assertEqual(set(versions.keys()), {"0.17.0"})
         ascend_versions = data["engines"]["vllm-ascend"]["versions"]
-        self.assertEqual(set(ascend_versions.keys()), {"0.17.0"})
+        self.assertEqual(set(ascend_versions.keys()), {"0.17.0rc1"})
 
         features = versions["0.17.0"]["features"]
         self.assertIn("ears", features)
         self.assertIn("sparse_kv", features)
         self.assertNotIn("draft_model", features)
 
-        ascend_features = ascend_versions["0.17.0"]["features"]
+        ascend_features = ascend_versions["0.17.0rc1"]["features"]
         self.assertEqual(set(ascend_features.keys()), {"ears", "draft_model"})
+        self.assertTrue(ascend_versions["0.17.0rc1"]["is_default"])
+        self.assertEqual(set(ascend_versions["0.17.0rc1"]["features"].keys()), {"ears", "draft_model"})
 
     def test_manifest_public_surface_excludes_merged_private_entries(self):
         manifest_data = load_supported_features()
         version_spec = manifest_data["engines"]["vllm"]["versions"]["0.17.0"]
-        ascend_version_spec = manifest_data["engines"]["vllm-ascend"]["versions"]["0.17.0"]
+        ascend_version_spec = manifest_data["engines"]["vllm-ascend"]["versions"]["0.17.0rc1"]
 
         self.assertIn("ears", version_spec["features"])
         self.assertIn("sparse_kv", version_spec["features"])
         self.assertNotIn("draft_model", version_spec["features"])
         self.assertEqual(set(ascend_version_spec["features"].keys()), {"ears", "draft_model"})
         self.assertNotIn("adaptive_draft_model", ascend_version_spec["features"])
+
+    def test_manifest_accepts_vllm_ascend_rc1_exact_match(self):
+        data = load_supported_features()
+        ver, spec = resolve_version("vllm-ascend", "0.17.0rc1", data["engines"]["vllm-ascend"])
+        self.assertEqual(ver, "0.17.0rc1")
+        self.assertTrue(spec["is_default"])
+
+    def test_manifest_rejects_vllm_ascend_stable_tag_without_rc1(self):
+        data = load_supported_features()
+        with self.assertRaises(ValueError) as ctx:
+            resolve_version("vllm-ascend", "0.17.0", data["engines"]["vllm-ascend"])
+        self.assertIn("not a validated patched version", str(ctx.exception))
 
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):
@@ -588,7 +602,7 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
         from contextlib import suppress
 
         calls = []
-        features_json = '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+        features_json = '{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
 
         with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):
             with mock.patch.object(
@@ -612,13 +626,13 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
                     with suppress(SystemExit):  # pylint: disable=avoid-using-exit
                         install_main()
 
-        self.assertEqual(calls, [("vllm-ascend", "0.17.0", ["draft_model"], True, "vllm-ascend")])
+        self.assertEqual(calls, [("vllm-ascend", "0.17.0rc1", ["draft_model"], True, "vllm-ascend")])
 
     def test_main_preserves_requested_engine_name_in_env_hint(self):
         import unittest.mock as mock
         from contextlib import suppress
 
-        features_json = '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+        features_json = '{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
         captured = io.StringIO()
 
         with mock.patch("sys.argv", ["install.py", "--dry-run", "--features", features_json]):

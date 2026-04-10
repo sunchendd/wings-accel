@@ -4,8 +4,7 @@ Integration test for the wings-engine-patch monkey-patch framework.
 Verifies:
   1. .pth hook is installed in site-packages
   2. wrapt post-import hook mechanism works (synthetic module)
-  3. the adaptive draft model patch can be enabled cleanly for vllm
-  4. _auto_patch.py is triggered by the .pth file on Python startup (subprocess)
+  3. _auto_patch.py is triggered by the .pth file on Python startup (subprocess)
 
 Run with:
     python tests/test_integration_real.py
@@ -160,45 +159,7 @@ class TestWraptHookMechanism(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 3. Direct patch registration: adaptive_draft_model
-# ---------------------------------------------------------------------------
-
-class TestAdaptiveDraftModelPatch(unittest.TestCase):
-
-    def test_patch_vllm_adaptive_draft_model_logs_to_stderr(self):
-        import io
-        from unittest.mock import patch
-
-        from wings_engine_patch.patch_vllm_container.v0_17_0 import (
-            adaptive_draft_model_patch,
-        )
-
-        buf = io.StringIO()
-        with patch("sys.stderr", buf):
-            adaptive_draft_model_patch.patch_vllm_adaptive_draft_model()
-
-        self.assertIn(
-            "[wins-accel] adaptive_draft_model patch enabled",
-            buf.getvalue(),
-        )
-
-    def test_adaptive_draft_length_controller_adjusts_lengths(self):
-        from wings_engine_patch.patch_vllm_container.v0_17_0.adaptive_draft_model_patch import (
-            AdaptiveDraftLengthController,
-        )
-
-        controller = AdaptiveDraftLengthController([1, 2, 4], initial_length=2)
-
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 2)
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 2)
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=8), 4)
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 4)
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 4)
-        self.assertEqual(controller.observe_iteration(num_draft_tokens=8, num_accepted_tokens=0), 2)
-
-
-# ---------------------------------------------------------------------------
-# 4. Subprocess: _auto_patch.py triggered by .pth on startup
+# 3. Subprocess: _auto_patch.py triggered by .pth on startup
 # ---------------------------------------------------------------------------
 
 class TestAutoPatchSubprocess(unittest.TestCase):

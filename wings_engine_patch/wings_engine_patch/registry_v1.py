@@ -37,7 +37,7 @@ def _build_vllm_v0_17_0_features():
 
 
 def _build_vllm_ascend_v0_17_0_features():
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+    from wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1 import (
         draft_model_patch,
         ears_patch,
     )
@@ -72,7 +72,7 @@ _registered_patches = {
         }
     },
     'vllm-ascend': {
-        "0.17.0": {
+        "0.17.0rc1": {
             'is_default': True,
             'builder': _build_vllm_ascend_v0_17_0_features
         }
@@ -153,6 +153,16 @@ def _select_version(inference_engine: str, requested_version: str, engine_specs:
 
     min_supported, min_version_str, _ = parsed_versions[0]
     max_supported, max_version_str, _ = parsed_versions[-1]
+
+    if (
+        not requested.is_prerelease
+        and max_supported.is_prerelease
+        and requested.release == max_supported.release
+    ):
+        raise UnsupportedVersionError(
+            f"Requested version '{requested_version}' for engine '{inference_engine}' is not a "
+            f"validated patched version. Supported versions: {sorted(engine_specs.keys())}."
+        )
 
     if requested < min_supported:
         raise UnsupportedVersionError(

@@ -33,7 +33,7 @@ def _debug_enabled() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Utility: register-or-apply hook (same pattern as adaptive_draft_model_patch)
+# Utility: register-or-apply hook for import-time patch registration
 # ---------------------------------------------------------------------------
 
 def _register_or_apply_post_import_hook(module_name: str, patcher) -> None:

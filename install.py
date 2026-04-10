@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 wings-accel Feature Installation CLI
 
@@ -197,6 +198,16 @@ def _classify_requested_version(
 
     min_supported, min_version_str, _ = parsed_versions[0]
     max_supported, max_version_str, _ = parsed_versions[-1]
+
+    if (
+        not requested.is_prerelease
+        and max_supported.is_prerelease
+        and requested.release == max_supported.release
+    ):
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
+            f"Supported versions: {sorted(versions.keys())}."
+        )
 
     if requested < min_supported:
         raise ValueError(

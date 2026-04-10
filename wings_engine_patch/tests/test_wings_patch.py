@@ -125,19 +125,34 @@ class TestWingsPatchMechanism(unittest.TestCase):
         self.assertEqual(set(ascend_feature_map.keys()), {"ears", "draft_model"})
 
     def test_enable_accepts_vllm_ascend_alias(self):
-        failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_accepts_vllm_underscore_ascend_alias(self):
-        failures = registry_v1.enable('vllm_ascend', ['draft_model'], version='0.17.0')
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            failures = registry_v1.enable('vllm_ascend', ['draft_model'], version='0.17.0rc1')
         self.assertEqual(failures, [])
 
+    def test_enable_accepts_vllm_ascend_rc1(self):
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0rc1')
+        self.assertEqual(failures, [])
+
+    def test_enable_rejects_vllm_ascend_stable_tag_without_rc1(self):
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            with self.assertRaises(registry_v1.UnsupportedVersionError) as ctx:
+                registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
+        self.assertIn("not a validated patched version", str(ctx.exception))
+
     def test_enable_standalone_draft_model_feature(self):
-        failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_ears_and_draft_model_together(self):
-        failures = registry_v1.enable('vllm-ascend', ['ears', 'draft_model'], version='0.17.0')
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            failures = registry_v1.enable('vllm-ascend', ['ears', 'draft_model'], version='0.17.0rc1')
         self.assertEqual(failures, [])
 
 
@@ -148,10 +163,10 @@ class TestAutoPatchModule(unittest.TestCase):
         {'vllm': {'version': '0.17.0', 'features': ['ears']}}
     )
     DRAFT_MODEL_ASCEND_OPTIONS = json.dumps(
-        {'vllm-ascend': {'version': '0.17.0', 'features': ['draft_model']}}
+        {'vllm-ascend': {'version': '0.17.0rc1', 'features': ['draft_model']}}
     )
     DRAFT_MODEL_UNDERSCORE_OPTIONS = json.dumps(
-        {'vllm_ascend': {'version': '0.17.0', 'features': ['draft_model']}}
+        {'vllm_ascend': {'version': '0.17.0rc1', 'features': ['draft_model']}}
     )
     EARS_LOG = '[wins-accel] ears patch enabled'
     EARS_WARNING = "Feature 'ears' not found in registry"
@@ -330,7 +345,7 @@ class TestAutoPatchModule(unittest.TestCase):
             ):
                 importlib.reload(ap_mod)
 
-        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0")])
+        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0rc1")])
 
     def test_auto_patch_normalizes_vllm_underscore_alias_before_enable(self):
         import importlib
@@ -351,7 +366,7 @@ class TestAutoPatchModule(unittest.TestCase):
             ):
                 importlib.reload(ap_mod)
 
-        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0")])
+        self.assertEqual(calls, [("vllm-ascend", ["draft_model"], "0.17.0rc1")])
 
     def _run_auto_patch(self, env_value):
         """Execute _auto_patch module-level code with a given env var value."""

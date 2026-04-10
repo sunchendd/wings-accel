@@ -152,6 +152,30 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
     assert "newer than the highest validated version" in captured_stderr.getvalue()
 
 
+def test_vllm_ascend_rc1_version_resolves_exactly():
+    manifest_data = install_module.load_supported_features()
+
+    resolved_version, version_spec = install_module.resolve_version(
+        "vllm-ascend",
+        "0.17.0rc1",
+        manifest_data["engines"]["vllm-ascend"],
+    )
+
+    assert resolved_version == "0.17.0rc1"
+    assert set(version_spec["features"].keys()) == {"ears", "draft_model"}
+
+
+def test_vllm_ascend_stable_tag_is_rejected():
+    manifest_data = install_module.load_supported_features()
+
+    with pytest.raises(ValueError, match="not a validated patched version"):
+        install_module.resolve_version(
+            "vllm-ascend",
+            "0.17.0",
+            manifest_data["engines"]["vllm-ascend"],
+        )
+
+
 def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_arctic(
     monkeypatch, tmp_path
 ):
