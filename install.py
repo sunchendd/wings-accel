@@ -161,12 +161,12 @@ def _get_packaging_version_types():
 
 
 def _parse_supported_versions(engine_name: str, versions: dict) -> list[tuple[object, str, dict]]:
-    Version, InvalidVersion = _get_packaging_version_types()
+    version_cls, invalid_version_cls = _get_packaging_version_types()
     parsed_versions: list[tuple[object, str, dict]] = []
     for version_str, spec in versions.items():
         try:
-            parsed_versions.append((Version(version_str), version_str, spec))
-        except InvalidVersion as exc:
+            parsed_versions.append((version_cls(version_str), version_str, spec))
+        except invalid_version_cls as exc:
             raise ValueError(
                 f"Engine '{engine_name}' declares unsupported version string '{version_str}' "
                 "that is not PEP 440 compatible."
@@ -180,13 +180,13 @@ def _classify_requested_version(
     requested_version: str,
     versions: dict,
 ) -> tuple[str, str, dict]:
-    Version, InvalidVersion = _get_packaging_version_types()
+    version_cls, invalid_version_cls = _get_packaging_version_types()
     if requested_version in versions:
         return "exact", requested_version, versions[requested_version]
 
     try:
-        requested = Version(requested_version)
-    except InvalidVersion as exc:
+        requested = version_cls(requested_version)
+    except invalid_version_cls as exc:
         raise ValueError(
             f"Version '{requested_version}' for engine '{engine_name}' is not a valid PEP 440 version."
         ) from exc

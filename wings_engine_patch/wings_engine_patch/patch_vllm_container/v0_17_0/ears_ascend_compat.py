@@ -121,15 +121,15 @@ def _patch_vllm_worker_eagle_module(module) -> None:
                 next_token = next_prefill_tokens[req_state_idx]
 
             if query_len > 1:
-                input_buffers.input_ids[query_start : query_start + query_len - 1] = input_batch.input_ids[
-                    query_start + 1 : query_start + query_len
+                input_buffers.input_ids[query_start:query_start + query_len - 1] = input_batch.input_ids[
+                    query_start + 1:query_start + query_len
                 ]
 
             last_token_index = query_start + query_len - 1
             last_token_indices[batch_idx] = last_token_index
             input_buffers.input_ids[last_token_index] = next_token.to(dtype=input_buffers.input_ids.dtype)
-            input_buffers.positions[query_start : query_start + query_len] = input_batch.positions[
-                query_start : query_start + query_len
+            input_buffers.positions[query_start:query_start + query_len] = input_batch.positions[
+                query_start:query_start + query_len
             ]
         return last_token_indices
 
@@ -148,9 +148,9 @@ def _patch_vllm_worker_eagle_module(module) -> None:
 
         num_reqs = int(draft_tokens.shape[0])
         device = input_buffers.query_start_loc.device
-        input_buffers.query_start_loc[: num_reqs + 1] = torch.arange(num_reqs + 1, dtype=torch.int32, device=device)
+        input_buffers.query_start_loc[:num_reqs + 1] = torch.arange(num_reqs + 1, dtype=torch.int32, device=device)
         if max_num_reqs + 1 > num_reqs + 1:
-            input_buffers.query_start_loc[num_reqs + 1 : max_num_reqs + 1] = num_reqs
+            input_buffers.query_start_loc[num_reqs + 1:max_num_reqs + 1] = num_reqs
         if max_num_reqs > num_reqs:
             input_buffers.seq_lens[num_reqs:max_num_reqs] = 0
 
