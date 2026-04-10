@@ -1,12 +1,12 @@
 """vllm-ascend 0.17.0rc1 runtime patches."""
 
-from importlib import import_module
-
 __all__ = [
     "draft_model_patch",
     "ears_patch",
     "patch_vllm_draft_model",
 ]
+
+from importlib import import_module
 
 
 def __getattr__(name):
