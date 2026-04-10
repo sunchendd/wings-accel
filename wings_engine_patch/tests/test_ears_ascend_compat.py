@@ -38,10 +38,12 @@ def _load_ascend_compat_modules():
 
 def _registered_hooks(ears_patch):
     registered_hooks = []
+
+    def fake_register_post_import_hook(patcher, registered_module_name):
+        registered_hooks.append((registered_module_name, patcher))
+
     fake_wrapt = types.SimpleNamespace(
-        register_post_import_hook=lambda patcher, registered_module_name: registered_hooks.append(
-            (registered_module_name, patcher)
-        )
+        register_post_import_hook=fake_register_post_import_hook
     )
 
     with mock.patch.dict(sys.modules, {"wrapt": fake_wrapt}, clear=False):
@@ -61,13 +63,18 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_helper_returns_none_for_target_module(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
-        module = types.SimpleNamespace(__name__="vllm_ascend.ascend_forward_context", _EXTRA_CTX=types.SimpleNamespace(extra_attrs=()))
+        self.assertIsNotNone(ears_ascend_compat)
+        module = types.SimpleNamespace(
+            __name__="vllm_ascend.ascend_forward_context",
+            _EXTRA_CTX=types.SimpleNamespace(extra_attrs=())
+        )
 
         self.assertIsNone(ears_ascend_compat.patch_vllm_ascend_draft_compat(module))
         self.assertTrue(getattr(module, "_wings_ears_ascend_draft_compat_patched", False))
 
     def test_missing_module_path_is_a_noop(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(__name__="vllm.worker.model_runner_v1")
 
         self.assertIsNone(ears_ascend_compat.patch_vllm_ascend_draft_compat(module))
@@ -75,6 +82,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_repeated_patch_registration_does_not_wrap_twice(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
 
         module = types.SimpleNamespace(
             __name__="vllm_ascend.compilation.acl_graph",
@@ -100,6 +108,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_vllm_ears_registers_target_module_hooks(self):
         ears_patch, _ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_patch)
         registered_hooks = _registered_hooks(ears_patch)
         registered_patchers = {
             module_name: patcher for module_name, patcher in registered_hooks if module_name in TARGET_MODULES
@@ -111,22 +120,26 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_vllm_ears_registers_vllm_eagle_compat_hook(self):
         ears_patch, _ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_patch)
         registered_hooks = _registered_hooks(ears_patch)
 
         self.assertIn((VLLM_COMPAT_MODULE, ears_patch.patch_vllm_ascend_draft_compat), registered_hooks)
 
     def test_patch_ascend_forward_context_preserves_draft_context_fields(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         extra_ctx = types.SimpleNamespace(extra_attrs=("is_draft_model",))
         module = types.SimpleNamespace(__name__="vllm_ascend.ascend_forward_context", _EXTRA_CTX=extra_ctx)
 
         ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+        patched_extra_ctx = getattr(module, "_EXTRA_CTX")
 
-        self.assertIn("draft_attn_metadatas", module._EXTRA_CTX.extra_attrs)
-        self.assertEqual(module._EXTRA_CTX.extra_attrs.count("draft_attn_metadatas"), 1)
+        self.assertIn("draft_attn_metadatas", patched_extra_ctx.extra_attrs)
+        self.assertEqual(patched_extra_ctx.extra_attrs.count("draft_attn_metadatas"), 1)
 
     def test_patch_acl_graph_adds_draft_graph_helpers(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(__name__="vllm_ascend.compilation.acl_graph", _graph_params=None)
 
         ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
@@ -138,6 +151,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_mla_v1_keeps_supported_ears_methods_callable(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(
             __name__="vllm_ascend.attention.mla_v1",
             SUPPORTED_SPECULATIVE_METHODS=("eagle3",),
@@ -152,6 +166,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_vllm_eagle_module_adds_legacy_prepare_helpers(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(__name__=VLLM_COMPAT_MODULE)
 
         ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
@@ -161,6 +176,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_patch_vllm_eagle_module_restores_legacy_package_exports(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         eagle_speculator = object()
         cuda_graph_manager = object()
         module = types.SimpleNamespace(__name__=VLLM_COMPAT_MODULE)
@@ -182,6 +198,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_legacy_prepare_eagle_inputs_matches_old_contract(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(__name__=VLLM_COMPAT_MODULE)
         ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
 
@@ -216,6 +233,7 @@ class TestEarsAscendCompat(unittest.TestCase):
 
     def test_legacy_prepare_eagle_decode_matches_old_contract(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
         module = types.SimpleNamespace(__name__=VLLM_COMPAT_MODULE)
         ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
 

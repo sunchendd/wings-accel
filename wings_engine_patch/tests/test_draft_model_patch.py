@@ -39,11 +39,14 @@ class TestDraftModelPatch(unittest.TestCase):
 
     def test_patch_vllm_draft_model_logs_to_stderr(self):
         draft_model_patch = _load_draft_model_patch()
+        self.assertIsNotNone(draft_model_patch)
         registered_hooks = []
+
+        def fake_register_post_import_hook(patcher, module_name):
+            registered_hooks.append((module_name, patcher))
+
         fake_wrapt = types.SimpleNamespace(
-            register_post_import_hook=lambda patcher, module_name: registered_hooks.append(
-                (module_name, patcher)
-            )
+            register_post_import_hook=fake_register_post_import_hook
         )
 
         buf = io.StringIO()
@@ -59,6 +62,7 @@ class TestDraftModelPatch(unittest.TestCase):
 
     def test_patch_eagle_proposer_aligns_hidden_states_for_draft_model(self):
         draft_model_patch = _load_draft_model_patch()
+        self.assertIsNotNone(draft_model_patch)
 
         class SpecDecodeBaseProposer:
             def __init__(self):
@@ -94,6 +98,7 @@ class TestDraftModelPatch(unittest.TestCase):
 
     def test_patch_eagle_proposer_leaves_non_draft_methods_unchanged(self):
         draft_model_patch = _load_draft_model_patch()
+        self.assertIsNotNone(draft_model_patch)
 
         class SpecDecodeBaseProposer:
             def __init__(self):

@@ -316,12 +316,13 @@ class TestAutoPatchModule(unittest.TestCase):
         import wings_engine_patch._auto_patch as ap_mod
 
         calls = []
+        
+        def fake_enable(engine_name, features, version):
+            calls.append((engine_name, features, version))
+            return []
+        
         with patch("wings_engine_patch.registry.enable") as enable_mock:
-            enable_mock.side_effect = (
-                lambda engine_name, features, version: calls.append(
-                    (engine_name, features, version)
-                ) or []
-            )
+            enable_mock.side_effect = fake_enable
             with patch.dict(
                 os.environ,
                 {"WINGS_ENGINE_PATCH_OPTIONS": self.DRAFT_MODEL_ASCEND_OPTIONS},
@@ -336,12 +337,13 @@ class TestAutoPatchModule(unittest.TestCase):
         import wings_engine_patch._auto_patch as ap_mod
 
         calls = []
+        
+        def fake_enable(engine_name, features, version):
+            calls.append((engine_name, features, version))
+            return []
+        
         with patch("wings_engine_patch.registry.enable") as enable_mock:
-            enable_mock.side_effect = (
-                lambda engine_name, features, version: calls.append(
-                    (engine_name, features, version)
-                ) or []
-            )
+            enable_mock.side_effect = fake_enable
             with patch.dict(
                 os.environ,
                 {"WINGS_ENGINE_PATCH_OPTIONS": self.DRAFT_MODEL_UNDERSCORE_OPTIONS},

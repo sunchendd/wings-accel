@@ -597,12 +597,17 @@ class TestRuntimeDependencyInstallFlow(unittest.TestCase):
                 side_effect=lambda dry_run=False: None,
                 create=True,
             ):
+                def fake_install_engine(
+                    engine_name, version, features, dry_run=False, **kwargs
+                ):
+                    calls.append(
+                        (engine_name, version, features, dry_run, kwargs.get("display_engine_name"))
+                    )
+                
                 with mock.patch.object(
                     install_module,
                     "install_engine",
-                    side_effect=lambda engine_name, version, features, dry_run=False, **kwargs: calls.append(
-                        (engine_name, version, features, dry_run, kwargs.get("display_engine_name"))
-                    ),
+                    side_effect=fake_install_engine,
                 ):
                     with suppress(SystemExit):  # pylint: disable=avoid-using-exit
                         install_main()

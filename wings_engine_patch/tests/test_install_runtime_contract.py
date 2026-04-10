@@ -1,9 +1,17 @@
 import io
+import os
 import sys
 from contextlib import suppress
 
-import install as install_module
 import pytest
+
+PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(PACKAGE_ROOT, ".."))
+
+sys.path.append(PACKAGE_ROOT)
+sys.path.append(PROJECT_ROOT)
+
+import install as install_module
 
 
 def test_find_local_whl_prefers_flat_delivery_dir(tmp_path, monkeypatch):
@@ -131,13 +139,11 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
         ],
     )
     monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
-    monkeypatch.setattr(
-        install_module,
-        "install_engine",
-        lambda engine_name, version, features, dry_run=False: calls.append(
-            (engine_name, version, features, dry_run)
-        ),
-    )
+
+    def fake_install_engine(engine_name, version, features, dry_run=False):
+        calls.append((engine_name, version, features, dry_run))
+
+    monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
 
     with suppress(SystemExit):
         install_module.main()
@@ -153,18 +159,19 @@ def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_
     packaging_wheel = tmp_path / "packaging-26.0-py3-none-any.whl"
     calls = []
 
+    def fake_find_local_wheel_by_prefix(prefix):
+        return {"wrapt": wrapt_wheel, "packaging": packaging_wheel}.get(prefix)
+
     monkeypatch.setattr(
         install_module,
         "_find_local_wheel_by_prefix",
-        lambda prefix: {
-            "wrapt": wrapt_wheel,
-            "packaging": packaging_wheel,
-        }.get(prefix),
+        fake_find_local_wheel_by_prefix,
     )
-    monkeypatch.setattr(
-        install_module,
-        "_install_local_dependency",
-        lambda package_name, module_name, wheel_path, dry_run=False, **kwargs: calls.append(
+
+    def fake_install_local_dependency(
+        package_name, module_name, wheel_path, dry_run=False, **kwargs
+    ):
+        calls.append(
             (
                 "dep",
                 package_name,
@@ -173,7 +180,12 @@ def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_
                 dry_run,
                 kwargs.get("missing_ok", False),
             )
-        ),
+        )
+
+    monkeypatch.setattr(
+        install_module,
+        "_install_local_dependency",
+        fake_install_local_dependency,
     )
     monkeypatch.setattr(
         install_module,

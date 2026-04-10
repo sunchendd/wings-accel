@@ -26,17 +26,25 @@ def _load_nvidia_modules():
 class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
     def test_patch_vllm_ears_delegates_nvidia_registration_to_runtime_hooks_module(self):
         ears_patch, ears_nvidia_runtime_hooks = _load_nvidia_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_nvidia_runtime_hooks)
         calls = []
+
+        def capture_register_hook(register_hook):
+            calls.append(register_hook)
+
+        def noop_register(*_args, **_kwargs):
+            return None
 
         with mock.patch.object(
             ears_nvidia_runtime_hooks,
             "register_nvidia_runtime_hooks",
-            side_effect=lambda register_hook: calls.append(register_hook),
+            side_effect=capture_register_hook,
         ):
             with mock.patch.object(
                 ears_patch,
                 "_register_or_apply_post_import_hook",
-                side_effect=lambda *_args, **_kwargs: None,
+                side_effect=noop_register,
             ) as register_hook:
                 ears_patch.patch_vllm_ears()
 
@@ -44,6 +52,8 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
 
     def test_gpu_model_runner_replaces_rejection_sampler_when_enabled(self):
         ears_patch, ears_nvidia_runtime_hooks = _load_nvidia_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_nvidia_runtime_hooks)
 
         class FakeGPUModelRunner:
             def __init__(self):
@@ -60,7 +70,10 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
 
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: FakeEarsSampler  # pylint: disable=protected-access
+            def fake_factory():
+                return FakeEarsSampler
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_nvidia_runtime_hooks._patch_vllm_gpu_model_runner_module(fake_gpu_module)  # pylint: disable=protected-access
                 runner = fake_gpu_module.GPUModelRunner()
@@ -73,6 +86,8 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
 
     def test_gpu_model_runner_preserves_original_sampler_when_tolerance_disabled(self):
         ears_patch, ears_nvidia_runtime_hooks = _load_nvidia_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_nvidia_runtime_hooks)
         original_sampler = object()
 
         class FakeGPUModelRunner:
@@ -84,7 +99,10 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
         fake_gpu_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: object  # pylint: disable=protected-access
+            def fake_object_factory():
+                return object
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.0"}, clear=False):
                 ears_nvidia_runtime_hooks._patch_vllm_gpu_model_runner_module(fake_gpu_module)  # pylint: disable=protected-access
                 runner = fake_gpu_module.GPUModelRunner()
@@ -96,6 +114,8 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
 
     def test_gpu_model_runner_preserves_original_sampler_for_unsupported_methods(self):
         ears_patch, ears_nvidia_runtime_hooks = _load_nvidia_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_nvidia_runtime_hooks)
         original_sampler = object()
 
         class FakeGPUModelRunner:
@@ -107,7 +127,10 @@ class TestEarsNvidiaRuntimeHooks(unittest.TestCase):
         fake_gpu_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: object  # pylint: disable=protected-access
+            def fake_object_factory():
+                return object
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_nvidia_runtime_hooks._patch_vllm_gpu_model_runner_module(fake_gpu_module)  # pylint: disable=protected-access
                 runner = fake_gpu_module.GPUModelRunner()

@@ -30,7 +30,7 @@ def _patch_vllm_ascend_model_runner_module(module) -> None:
         return result
 
     patched_set_up_drafter._wings_ears_patched = True  # pylint: disable=protected-access
-    runner_cls._set_up_drafter = patched_set_up_drafter
+    setattr(runner_cls, "_set_up_drafter", patched_set_up_drafter)
 
 
 def register_ascend_runtime_hooks(register_hook) -> None:

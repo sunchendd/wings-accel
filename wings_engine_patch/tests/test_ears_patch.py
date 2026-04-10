@@ -26,10 +26,12 @@ def _load_ears_patch_module():
 def patch_vllm_ears_registers(module_name):
     ears_patch = _load_ears_patch_module()
     registered_hooks = []
+    
+    def fake_register_post_import_hook(patcher, registered_module_name):
+        registered_hooks.append((registered_module_name, patcher))
+    
     fake_wrapt = types.SimpleNamespace(
-        register_post_import_hook=lambda patcher, registered_module_name: registered_hooks.append(
-            (registered_module_name, patcher)
-        )
+        register_post_import_hook=fake_register_post_import_hook
     )
 
     with mock.patch.dict(sys.modules, {"wrapt": fake_wrapt}, clear=False):
