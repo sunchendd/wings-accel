@@ -122,7 +122,7 @@ def rejection_random_sample_ears_pytorch(
     is_greedy,
     max_spec_len,
     vocab_size,
-    IS_NGRAM=False,
+    is_ngram=False,
     base_tolerance=0.0,
 ):
     torch = _torch()
@@ -141,7 +141,7 @@ def rejection_random_sample_ears_pytorch(
     global_token_indices = global_token_indices.clamp(0, draft_token_ids.shape[0] - 1)
     draft_tokens = draft_token_ids[global_token_indices]
 
-    if IS_NGRAM:
+    if is_ngram:
         draft_token_probs = torch.ones_like(draft_tokens, dtype=torch.float32)
     else:
         flat_indices = global_token_indices.flatten()
@@ -312,7 +312,7 @@ def _get_entropy_adaptive_rejection_sampler_class():
             is_greedy,
             max_spec_len,
             vocab_size,
-            IS_NGRAM=draft_probs is None,
+            is_ngram=draft_probs is None,
             base_tolerance=base_tolerance,
         )
         return output_token_ids
@@ -413,12 +413,13 @@ def _maybe_enable_ears_sampler(runner) -> None:
     spec_config = getattr(runner, "speculative_config", None)
     method = getattr(spec_config, "method", None)
     tolerance = _read_ears_tolerance()
-    if (
-        tolerance <= 0.0
-        or method not in _SUPPORTED_EARS_METHODS
-        or getattr(runner, "rejection_sampler", None) is None
-        or getattr(runner, "sampler", None) is None
-    ):
+    if tolerance <= 0.0:
+        return
+    if method not in _SUPPORTED_EARS_METHODS:
+        return
+    if getattr(runner, "rejection_sampler", None) is None:
+        return
+    if getattr(runner, "sampler", None) is None:
         return
     sampler_cls = _get_entropy_adaptive_rejection_sampler_class()
     runner.rejection_sampler = sampler_cls(

@@ -1,6 +1,3 @@
-from importlib import import_module
-
-
 __all__ = [
     "adaptive_draft_model_patch",
     "draft_model_patch",
@@ -11,6 +8,8 @@ __all__ = [
     "patch_vllm_sparse_kv",
     "sparse_kv_patch",
 ]
+
+from importlib import import_module
 
 
 def __getattr__(name):
