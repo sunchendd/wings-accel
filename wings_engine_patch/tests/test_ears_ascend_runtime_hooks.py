@@ -29,6 +29,7 @@ def _load_ascend_modules():
 class TestEarsAscendRuntimeHooks(unittest.TestCase):
     def test_envs_registers_vllm_ears_tolerance(self):
         _ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
         fake_envs_module = types.SimpleNamespace(env_variables={})
 
         ears_ascend_runtime_hooks._patch_vllm_ascend_envs_module(fake_envs_module)  # pylint: disable=protected-access
@@ -37,6 +38,7 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_fake_npu_runner_set_up_drafter_gets_patched(self):
         _ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
 
         class FakeRunner:
             def _set_up_drafter(self):
@@ -46,10 +48,12 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
         ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_module)  # pylint: disable=protected-access
 
-        self.assertTrue(getattr(fake_module.NPUModelRunner._set_up_drafter, "_wings_ears_patched", False))
+        patched_method = getattr(fake_module.NPUModelRunner, "_set_up_drafter")
+        self.assertTrue(getattr(patched_method, "_wings_ears_patched", False))
 
     def test_repeated_patch_application_does_not_double_wrap(self):
         _ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
         maybe_enable_calls = []
 
         class FakeRunner:
@@ -63,16 +67,19 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
         fake_module = types.SimpleNamespace(NPUModelRunner=FakeRunner)
         original_maybe_enable = ears_ascend_runtime_hooks._maybe_enable_ears_sampler  # pylint: disable=protected-access
         try:
-            ears_ascend_runtime_hooks._maybe_enable_ears_sampler = lambda runner: maybe_enable_calls.append(runner)  # pylint: disable=protected-access
+            def fake_maybe_enable(runner):
+                maybe_enable_calls.append(runner)
+
+            ears_ascend_runtime_hooks._maybe_enable_ears_sampler = fake_maybe_enable  # pylint: disable=protected-access
 
             ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_module)  # pylint: disable=protected-access
-            first_wrapper = fake_module.NPUModelRunner._set_up_drafter
+            first_wrapper = getattr(fake_module.NPUModelRunner, "_set_up_drafter")
             ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_module)  # pylint: disable=protected-access
 
             runner = fake_module.NPUModelRunner()
-            result = runner._set_up_drafter()
+            result = getattr(runner, "_set_up_drafter")()
 
-            self.assertIs(fake_module.NPUModelRunner._set_up_drafter, first_wrapper)
+            self.assertIs(getattr(fake_module.NPUModelRunner, "_set_up_drafter"), first_wrapper)
             self.assertEqual(runner.call_count, 1)
             self.assertEqual(len(maybe_enable_calls), 1)
             self.assertEqual(result, "native-result")
@@ -81,6 +88,7 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_missing_or_non_callable_set_up_drafter_safely_noops(self):
         _ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
 
         class MissingRunner:
             pass
@@ -100,6 +108,8 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_supported_method_replaces_sampler_on_fake_npu_runner(self):
         ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
 
         class FakeNPUModelRunner:
             def __init__(self):
@@ -119,11 +129,14 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: FakeEarsSampler  # pylint: disable=protected-access
+            def fake_factory():
+                return FakeEarsSampler
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
                 runner = fake_npu_module.NPUModelRunner()
-                runner._set_up_drafter()
+                getattr(runner, "_set_up_drafter")()
 
             self.assertIsInstance(runner.rejection_sampler, FakeEarsSampler)
             self.assertEqual(runner.rejection_sampler.base_tolerance, 0.2)
@@ -132,6 +145,8 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_unsupported_method_keeps_native_sampler(self):
         ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
         original_sampler = object()
 
         class FakeNPUModelRunner:
@@ -146,11 +161,14 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
         fake_npu_module = types.SimpleNamespace(NPUModelRunner=FakeNPUModelRunner)
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: object  # pylint: disable=protected-access
+            def fake_object_factory():
+                return object
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
                 runner = fake_npu_module.NPUModelRunner()
-                runner._set_up_drafter()
+                getattr(runner, "_set_up_drafter")()
 
             self.assertIs(runner.rejection_sampler, original_sampler)
         finally:
@@ -158,6 +176,8 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_zero_tolerance_keeps_native_sampler(self):
         ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_patch)
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
         original_sampler = object()
 
         class FakeNPUModelRunner:
@@ -172,11 +192,14 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
         fake_npu_module = types.SimpleNamespace(NPUModelRunner=FakeNPUModelRunner)
         original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
         try:
-            ears_patch._get_entropy_adaptive_rejection_sampler_class = lambda: object  # pylint: disable=protected-access
+            def fake_object_factory():
+                return object
+
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.0"}, clear=False):
                 ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
                 runner = fake_npu_module.NPUModelRunner()
-                runner._set_up_drafter()
+                getattr(runner, "_set_up_drafter")()
 
             self.assertIs(runner.rejection_sampler, original_sampler)
         finally:
@@ -184,6 +207,7 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
     def test_non_dict_env_variables_safely_noops(self):
         _ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
+        self.assertIsNotNone(ears_ascend_runtime_hooks)
 
         for env_variables in (None, [], "bad-envs", object()):
             with self.subTest(env_variables=type(env_variables).__name__):

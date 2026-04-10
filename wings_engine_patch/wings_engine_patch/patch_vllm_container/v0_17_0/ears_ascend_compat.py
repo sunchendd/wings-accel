@@ -225,7 +225,7 @@ def _patch_eagle_proposer_module(module) -> None:
 
     patched_run_merged_draft = functools.update_wrapper(patched_run_merged_draft, original_method)
     patched_run_merged_draft._wings_parallel_spec_patched = True  # pylint: disable=protected-access
-    cls._run_merged_draft = patched_run_merged_draft
+    setattr(cls, "_run_merged_draft", patched_run_merged_draft)
 
 
 _MODULE_PATCHERS = {

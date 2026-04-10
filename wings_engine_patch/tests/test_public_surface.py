@@ -36,8 +36,14 @@ class TestPublicSurface(unittest.TestCase):
             )
 
     def test_root_and_package_manifests_only_expose_public_surface(self):
-        root_manifest = json.loads((Path(PROJECT_ROOT) / "supported_features.json").read_text(encoding="utf-8"))
-        package_manifest = json.loads((Path(PACKAGE_ROOT) / "wings_engine_patch" / "supported_features.json").read_text(encoding="utf-8"))
+        root_manifest = json.loads(
+            (Path(PROJECT_ROOT) / "supported_features.json").read_text(encoding="utf-8")
+        )
+        package_manifest = json.loads(
+            (Path(PACKAGE_ROOT) / "wings_engine_patch" / "supported_features.json").read_text(
+                encoding="utf-8"
+            )
+        )
 
         for manifest_data in (root_manifest, package_manifest):
             vllm_version_spec = manifest_data["engines"]["vllm"]["versions"]["0.17.0"]
