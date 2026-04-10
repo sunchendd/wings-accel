@@ -297,6 +297,11 @@ def _normalize_machine_arch(machine: str) -> str:
     return normalized
 
 
+def _is_arch_specific_wrapt_wheel(wheel_path: Path) -> bool:
+    wheel_name = wheel_path.name.lower()
+    return any(arch_tag in wheel_name for arch_tag in ("x86_64", "amd64", "aarch64", "arm64"))
+
+
 def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
     for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
         if not search_dir.exists():
@@ -308,9 +313,24 @@ def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
             arch_matches = [wheel for wheel in matches if current_arch in wheel.name]
             if arch_matches:
                 matches = arch_matches
+            else:
+                generic_matches = [wheel for wheel in matches if not _is_arch_specific_wrapt_wheel(wheel)]
+                if generic_matches:
+                    matches = generic_matches
+                else:
+                    continue
         if matches:
             return max(matches, key=lambda p: p.stat().st_mtime)
     return None
+
+
+def _build_feature_local_wheels() -> dict[str, tuple[str, Path | None]]:
+    return {
+        "sparse_kv": ("vsparse", _find_local_wheel_by_prefix("vsparse")),
+    }
+
+
+_FEATURE_LOCAL_WHEELS = _build_feature_local_wheels()
 
 
 def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:

@@ -70,6 +70,17 @@ def test_find_local_wrapt_wheel_matches_current_architecture_when_multiple_arch_
     assert install_module._find_local_wheel_by_prefix("wrapt").name == expected_name  # pylint: disable=protected-access
 
 
+def test_find_local_wrapt_wheel_skips_wrong_architecture_wheels_without_generic_fallback(tmp_path, monkeypatch):
+    wrapt_x86_wheel = tmp_path / "wrapt-2.1.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.whl"
+    wrapt_x86_wheel.write_text("wheel", encoding="utf-8")
+
+    monkeypatch.setattr(install_module, "_BASE_DIR", tmp_path)
+    monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
+    monkeypatch.setattr(install_module.platform, "machine", lambda: "aarch64")
+
+    assert install_module._find_local_wheel_by_prefix("wrapt") is None  # pylint: disable=protected-access
+
+
 def test_find_local_runtime_dep_wheel_in_build_output(tmp_path, monkeypatch):
     packaging_wheel = tmp_path / "build" / "output" / "packaging-26.0-py3-none-any.whl"
     packaging_wheel.parent.mkdir(parents=True)
@@ -122,6 +133,10 @@ def test_local_feature_wheel_install_does_not_force_reinstall(monkeypatch, tmp_p
     assert commands[0][:4] == [sys.executable, "-m", "pip", "install"]
     assert str(wheel_path) in commands[0]
     assert "--force-reinstall" not in commands[0]
+
+
+def test_feature_local_wheels_keep_sparse_kv_mapping():
+    assert install_module._FEATURE_LOCAL_WHEELS["sparse_kv"][0] == "vsparse"  # pylint: disable=protected-access
 
 
 def test_future_vllm_version_warns_and_preserves_requested_public_features(monkeypatch):
