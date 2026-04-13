@@ -42,7 +42,10 @@ def _patch_ascend_forward_context_module(module) -> None:
         return
     updated_attrs = _extend_unique(extra_attrs, ("draft_attn_metadatas",))
     if updated_attrs != extra_attrs:
-        extra_ctx.extra_attrs = updated_attrs
+        try:
+            extra_ctx.extra_attrs = updated_attrs
+        except AttributeError:
+            type(extra_ctx).extra_attrs = updated_attrs
 
 
 def _patch_acl_graph_module(module) -> None:

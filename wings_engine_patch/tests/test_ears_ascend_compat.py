@@ -137,6 +137,32 @@ class TestEarsAscendCompat(unittest.TestCase):
         self.assertIn("draft_attn_metadatas", patched_extra_ctx.extra_attrs)
         self.assertEqual(patched_extra_ctx.extra_attrs.count("draft_attn_metadatas"), 1)
 
+    def test_patch_ascend_forward_context_updates_proxy_class_attrs_when_instance_setter_blocks(self):
+        _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
+        self.assertIsNotNone(ears_ascend_compat)
+
+        class ExtraForwardContextProxy:
+            extra_attrs = ("is_draft_model",)
+
+            def __setattr__(self, name, value):
+                if name == "extra_attrs":
+                    raise AttributeError(
+                        f"{name} is not extra forward context attribute, "
+                        "please get/set it from vllm's _forward_context directly."
+                    )
+                super().__setattr__(name, value)
+
+        extra_ctx = ExtraForwardContextProxy()
+        module = types.SimpleNamespace(__name__="vllm_ascend.ascend_forward_context", _EXTRA_CTX=extra_ctx)
+
+        with self.assertRaisesRegex(AttributeError, "extra forward context attribute"):
+            extra_ctx.extra_attrs = ("draft_attn_metadatas",)
+
+        ears_ascend_compat.patch_vllm_ascend_draft_compat(module)
+
+        self.assertIn("draft_attn_metadatas", extra_ctx.extra_attrs)
+        self.assertEqual(extra_ctx.extra_attrs.count("draft_attn_metadatas"), 1)
+
     def test_patch_acl_graph_adds_draft_graph_helpers(self):
         _ears_patch, ears_ascend_compat, _exported_patcher = _load_ascend_compat_modules()
         self.assertIsNotNone(ears_ascend_compat)
