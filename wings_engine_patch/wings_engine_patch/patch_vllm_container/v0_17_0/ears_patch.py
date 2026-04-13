@@ -210,6 +210,43 @@ def rejection_random_sample_ears_pytorch(
     )
 
 
+def _sample_recovered_tokens_pytorch(
+    *,
+    num_draft_tokens,
+    draft_token_ids,
+    draft_probs,
+    target_probs,
+    sampling_metadata,
+):
+    torch = _torch()
+    if draft_token_ids.numel() == 0:
+        return torch.empty_like(draft_token_ids)
+
+    device = target_probs.device
+    batch_size = len(num_draft_tokens)
+    vocab_size = target_probs.shape[-1]
+    q = torch.empty((batch_size, vocab_size), dtype=torch.float32, device=device)
+    q.exponential_()
+    for req_idx, generator in sampling_metadata.generators.items():
+        if num_draft_tokens[req_idx] > 0:
+            q[req_idx].exponential_(generator=generator)
+    inv_q = q.reciprocal()
+
+    req_ids = torch.repeat_interleave(
+        torch.arange(batch_size, device=device),
+        torch.tensor(num_draft_tokens, device=device),
+    )
+
+    if draft_probs is None:
+        probs = target_probs.clone()
+        probs[torch.arange(draft_token_ids.shape[0], device=device), draft_token_ids] = 0.0
+    else:
+        probs = torch.clamp(target_probs - draft_probs, min=0.0)
+
+    scores = probs * inv_q[req_ids]
+    return scores.argmax(dim=-1).to(draft_token_ids.dtype)
+
+
 def _get_entropy_adaptive_rejection_sampler_class():
     global _EARS_REJECTION_SAMPLER_CLASS
     if _EARS_REJECTION_SAMPLER_CLASS is not None:
@@ -290,16 +327,25 @@ def _get_entropy_adaptive_rejection_sampler_class():
             sampling_metadata.generators,
             device,
         )
-        recovered_token_ids = sample_recovered_tokens(
-            max_spec_len,
-            num_draft_tokens,
-            cu_num_draft_tokens,
-            draft_token_ids,
-            draft_probs,
-            target_probs,
-            sampling_metadata,
-            device,
-        )
+        if target_probs.device.type == "npu":
+            recovered_token_ids = _sample_recovered_tokens_pytorch(
+                num_draft_tokens=num_draft_tokens,
+                draft_token_ids=draft_token_ids,
+                draft_probs=draft_probs,
+                target_probs=target_probs,
+                sampling_metadata=sampling_metadata,
+            )
+        else:
+            recovered_token_ids = sample_recovered_tokens(
+                max_spec_len,
+                num_draft_tokens,
+                cu_num_draft_tokens,
+                draft_token_ids,
+                draft_probs,
+                target_probs,
+                sampling_metadata,
+                device,
+            )
         rejection_random_sample_ears_pytorch(
             output_token_ids,
             cu_num_draft_tokens,
@@ -330,6 +376,8 @@ def _get_entropy_adaptive_rejection_sampler_class():
             sampling_metadata,
         ):
             assert metadata.max_spec_len <= MAX_SPEC_LEN
+            if sampling_metadata.all_greedy:
+                return super().forward(metadata, draft_probs, logits, sampling_metadata)
 
             bonus_logits_indices = metadata.bonus_logits_indices
             target_logits_indices = metadata.target_logits_indices
