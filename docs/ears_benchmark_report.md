@@ -46,6 +46,8 @@ evalscope perf \
   --max-tokens "${MAX_TOKENS}"
 ```
 
+The additional comparison in Section 6 keeps the same method and only changes `--top-p 0.95`.
+
 ### 2.3 Service startup parameters
 
 #### eagle3
@@ -171,11 +173,44 @@ Valid `ears on` runs contain lines like:
 | TTFT (s) | 9.6961 | 7.6372 | -21.23% |
 | TPOT (s) | 0.1331 | 0.1276 | -4.13% |
 
-## 6. Conclusions
+## 6. Additional results (`top_p=0.95`)
+
+### 6.1 eagle3 (`num_speculative_tokens=4`)
+
+| Metric | EARS off | EARS on | Change |
+| --- | ---: | ---: | ---: |
+| Output token throughput (tok/s) | 21.9675 | 24.1547 | +9.96% |
+| Total token throughput (tok/s) | 23.1002 | 25.4002 | +9.96% |
+| Average latency (s) | 23.3058 | 21.1952 | -9.06% |
+| TTFT (s) | 0.1200 | 0.1202 | +0.17% |
+| TPOT (s) | 0.0453 | 0.0412 | -9.05% |
+
+### 6.2 suffix (`num_speculative_tokens=15`)
+
+| Metric | EARS off | EARS on | Change |
+| --- | ---: | ---: | ---: |
+| Output token throughput (tok/s) | 26.1930 | 31.0566 | +18.57% |
+| Total token throughput (tok/s) | 27.5436 | 32.6579 | +18.57% |
+| Average latency (s) | 19.5461 | 16.4848 | -15.66% |
+| TTFT (s) | 0.0603 | 0.0564 | -6.47% |
+| TPOT (s) | 0.0381 | 0.0321 | -15.75% |
+
+### 6.3 mtp (`num_speculative_tokens=3`)
+
+| Metric | EARS off | EARS on | Change |
+| --- | ---: | ---: | ---: |
+| Output token throughput (tok/s) | 5.8116 | 6.3644 | +9.51% |
+| Total token throughput (tok/s) | 6.4110 | 7.0207 | +9.51% |
+| Average latency (s) | 44.0481 | 40.2220 | -8.69% |
+| TTFT (s) | 9.7293 | 7.7467 | -20.38% |
+| TPOT (s) | 0.1341 | 0.1269 | -5.37% |
+
+## 7. Conclusions
 
 1. EARS provides real benefit on Ascend in **non-greedy** `eagle3 / suffix / mtp` scenarios.
 2. The old “no gain” conclusion was invalid because the benchmark harness did not actually auto-load the patch.
 3. For the tested `mtp + ears` setup, **`num_speculative_tokens=3` is better than `4`** in absolute throughput:
    - `spec=4, ears on`: `6.0506 tok/s`
    - `spec=3, ears on`: `6.3516 tok/s`
-4. `suffix` shows the strongest gain in this benchmark set.
+4. Raising `top_p` from `0.9` to `0.95` does not remove the EARS benefit; all three methods still improve with EARS enabled.
+5. `suffix` shows the strongest gain in both benchmark sets.
