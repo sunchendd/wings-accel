@@ -27,7 +27,22 @@ export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0rc1", "fea
 export VLLM_EARS_TOLERANCE=0.5
 ```
 
-### 2.2 Common benchmark method
+### 2.2 Hardware and model test environment
+
+| Item | Value |
+| --- | --- |
+| Hardware | Ascend `910B4-1` host, `8 x NPU` available (`npu-smi 25.5.0`) |
+| Runtime | `vllm-ascend 0.17.0rc1` with `wings_engine_patch` auto-loaded |
+| Benchmark client | `evalscope perf` |
+| Dataset | `openqa` |
+| Qwen3-8B model path | `/data/Qwen3-8B` |
+| eagle3 draft model path | `/data/Qwen3-8B-speculator.eagle3` |
+| Qwen3.5-27B model path | `/data/Qwen3.5-27B` |
+| mtp draft model path | `/data/weight/Qwen3.5-27B-w8a8-mtp` |
+| eagle3 / suffix serving shape | single NPU (`NPU_VISIBLE=0`), `-tp 1` |
+| mtp serving shape | dual NPU (`NPU_VISIBLE=0,1`), `-tp 2` |
+
+### 2.3 Common benchmark method
 
 All valid comparisons in this document use:
 
@@ -48,7 +63,7 @@ evalscope perf \
 
 The additional comparison in Section 6 keeps the same method and only changes `--top-p 0.95`.
 
-### 2.3 Service startup parameters
+### 2.4 Service startup parameters
 
 #### eagle3
 
@@ -205,7 +220,35 @@ Valid `ears on` runs contain lines like:
 | TTFT (s) | 9.7293 | 7.7467 | -20.38% |
 | TPOT (s) | 0.1341 | 0.1269 | -5.37% |
 
-## 7. Conclusions
+## 7. Temperature sweep (`suffix`, `top_p=1.0`)
+
+### 7.1 Method
+
+This sweep is used to isolate the impact of `temperature` in the benchmark script.
+
+- Hardware: single Ascend `910B4-1` NPU (`NPU_VISIBLE=0`)
+- Model: `Qwen3-8B`
+- Speculative method: `suffix`, `num_speculative_tokens=15`
+- Fixed benchmark arguments: `top_p=1.0`, `number=5`, `parallel=1`, `max_tokens=512`, `dataset=openqa`, `stream=true`
+- Sweep values: `temperature=0 / 0.2 / 0.6 / 1.0`
+
+### 7.2 Results
+
+| Temperature | EARS off tok/s | EARS on tok/s | Change | Off latency (s) | On latency (s) | Note |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 0.0 | 30.4100 | 30.2311 | -0.59% | 16.8351 | 16.9342 | greedy path, no meaningful EARS gain |
+| 0.2 | 25.9045 | 29.4038 | +13.51% | 19.7636 | 17.4114 | non-greedy gain appears immediately |
+| 0.6 | 26.3782 | 32.0105 | +21.35% | 19.4087 | 15.9933 | strongest gain in this sweep |
+| 1.0 | 26.3735 | 31.7580 | +20.42% | 19.4121 | 16.1205 | gain stays high, close to `0.6` |
+
+### 7.3 Interpretation
+
+1. `temperature=0` stays on the greedy path, so the EARS tolerance relaxation does not materially participate in sampling.
+2. Once `temperature>0`, the benchmark enters a non-greedy path and EARS throughput gains become visible immediately.
+3. In this setup, the gain rises from `+13.51%` at `temperature=0.2` to about `+21%` at `0.6`, then stays near that level at `1.0`.
+4. Without EARS, non-greedy sampling lowers throughput from about `30.41 tok/s` to roughly `26 tok/s`; EARS recovers that loss and further improves throughput.
+
+## 8. Conclusions
 
 1. EARS provides real benefit on Ascend in **non-greedy** `eagle3 / suffix / mtp` scenarios.
 2. The old “no gain” conclusion was invalid because the benchmark harness did not actually auto-load the patch.
@@ -214,3 +257,6 @@ Valid `ears on` runs contain lines like:
    - `spec=3, ears on`: `6.3516 tok/s`
 4. Raising `top_p` from `0.9` to `0.95` does not remove the EARS benefit; all three methods still improve with EARS enabled.
 5. `suffix` shows the strongest gain in both benchmark sets.
+6. `temperature=0` is not a valid setting for evaluating EARS gains, because it stays on the greedy path.
+7. A small non-zero `temperature` is enough to expose EARS gains; in this sweep the benefit is already visible at `0.2`.
+8. For the tested `suffix + Qwen3-8B` setup, the temperature-driven EARS gain plateaus around `temperature=0.6 ~ 1.0`.
