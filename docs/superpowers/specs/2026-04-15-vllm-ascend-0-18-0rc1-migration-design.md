@@ -162,6 +162,7 @@ Registry contract:
 - `registry_v1.py` imports only package-level public entrypoints from `v0_18_0rc1.__init__`
 - registry feature mapping stays one feature to one public patch entrypoint list
 - tests should be able to import and exercise `draft_model_patch.py`, `ears_ascend_runtime_hooks.py`, and `ears_ascend_compat.py` independently
+- tests should also verify that `v0_18_0rc1.__init__` exposes only the two public patch entrypoints and does not become a grab-bag export surface
 
 ### 3. `draft_model` migration
 
@@ -195,12 +196,13 @@ Acceptance scope:
 
 - `mtp` must work
 - `suffix` must work
-- `eagle3` is out of the `0.18.0rc1` public support contract unless it is explicitly revalidated later
+- any other speculative method, including `eagle3`, is treated as unsupported for `0.18.0rc1` in this migration
 
-Implementation rule for `eagle3`:
+Unsupported-method rule:
 
-- if the migrated code can keep `eagle3` working with no extra branching, that is acceptable as an internal non-claimed path
-- manifest, README, and version-specific tests for `0.18.0rc1` must claim only the methods that are explicitly validated in this migration: `mtp` and `suffix`
+- unsupported methods must not enable the EARS sampler
+- runtime should remain stable if an unsupported method is requested, but no EARS activation log or support claim should appear
+- manifest, README, and version-specific tests for `0.18.0rc1` must claim only `mtp` and `suffix`
 
 ### 5. Install and runtime interface preservation
 
@@ -214,9 +216,12 @@ Required new valid forms:
 
 ```bash
 python install.py --features '{"vllm-ascend":{"version":"0.18.0rc1","features":["draft_model"]}}'
+python install.py --features '{"vllm_ascend":{"version":"0.18.0rc1","features":["draft_model"]}}'
 python install.py --check --features '{"vllm-ascend":{"version":"0.18.0rc1","features":["draft_model"]}}'
+python install.py --check --features '{"vllm_ascend":{"version":"0.18.0rc1","features":["draft_model"]}}'
 python install.py --features '{"vllm-ascend":{"version":"0.18.0rc1","features":["ears"]}}'
 export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend":{"version":"0.18.0rc1","features":["ears","draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm_ascend":{"version":"0.18.0rc1","features":["ears","draft_model"]}}'
 ```
 
 Acceptance requires both public paths to be exercised:
@@ -255,12 +260,16 @@ Add or update tests for:
 
 - support manifest listing `vllm-ascend@0.18.0rc1` with `ears` and `draft_model`
 - registry enablement for `0.18.0rc1`
+- registry/runtime alias acceptance for both `vllm-ascend` and `vllm_ascend`
 - standalone `draft_model`
 - combined `ears` + `draft_model`
 - `install.py --features` acceptance for `0.18.0rc1`
 - `install.py --check` acceptance for `0.18.0rc1`
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm-ascend`
+- `_auto_patch.py` acceptance for runtime env keyed by `vllm_ascend`
 - EARS supported-method contract including `mtp` and `suffix`
+- EARS non-activation for unsupported methods such as `eagle3` on `0.18.0rc1`
+- `v0_18_0rc1.__init__` export-surface test
 - any new module-path or signature adaptation introduced for `0.18.0rc1`
 
 Existing `0.17.0rc1` tests should continue to pass unchanged unless they are explicitly parameterized to cover both versions.
@@ -274,6 +283,7 @@ Container validation matrix:
 | Scenario | Model / config | Expected proof |
 | --- | --- | --- |
 | `draft_model` smoke | target `/data/Qwen3-8B`, draft `/data/Qwen3-0.6B`, `method="draft_model"`, `num_speculative_tokens=8`, `parallel_drafting=false` | install/check succeeds, server starts, drafter path loads, no version-signature mismatch |
+| `ears + draft_model` combined smoke | target `/data/Qwen3-8B`, draft `/data/Qwen3-0.6B`, features `["ears","draft_model"]`, single NPU, `tp=1` | combined startup succeeds, no hook conflict, both feature logs are reachable |
 | `ears` `suffix` smoke | target `/data/Qwen3-8B`, `method="suffix"`, `num_speculative_tokens=15`, single NPU, `tp=1` | runtime starts and emits EARS activation log for `suffix` |
 | `ears` `mtp` smoke | target `/data/Qwen3.5-27B`, draft `/data/weight/Qwen3.5-27B-w8a8-mtp`, `method="mtp"`, `num_speculative_tokens=3`, dual NPU, `tp=2` | runtime starts and emits EARS activation log for `mtp` |
 
@@ -347,6 +357,8 @@ If validation uncovers a tightly coupled fix, that fix may be committed separate
 ## Rollout notes
 
 - keep README examples explicit about `0.18.0rc1`
+- update both `README.md` and `docs/README.md`
 - document that `vllm-ascend` support is functional-first, not performance-guaranteed
 - preserve `0.17.0rc1` examples so existing users are not broken
 - write container-validation and EARS benchmark evidence to `docs/ears_benchmark_report_v0_18_0rc1.md`, so the implementation commit history and the validation artifact stay aligned
+- if the required container image, models, or NPU hardware are unavailable in the current environment, implementation may still land the code and repository tests, but the validation doc must record the exact missing prerequisite instead of claiming container success
