@@ -108,7 +108,7 @@ It keeps the existing architecture intact, gives the migration clear version bou
 | Engine | Version | Public feature | Default | Validation level |
 | --- | --- | --- | --- | --- |
 | `vllm` | `0.17.0` | `ears` | no | regression only |
-| `vllm` | `0.19.0` | `ears` | yes | unit + subprocess + container-adjacent smoke coverage |
+| `vllm` | `0.19.0` | `ears` | yes | unit + subprocess + exact-symbol import smoke |
 | `vllm-ascend` | `0.17.0rc1` | `ears` | no | regression only |
 | `vllm-ascend` | `0.18.0rc1` | `ears` | yes | unit + target-container validation + performance benchmark |
 
@@ -286,6 +286,18 @@ Required functional checks:
 - runtime logs show EARS enablement for the active method
 - at least one successful inference request per method confirms end-to-end functionality
 
+### 3.5 Base `vllm@0.19.0` import smoke
+
+Keep the base `vllm` validation smaller than the Ascend path and make it exact:
+
+- environment: a Python environment with `vllm==0.19.0` installed
+- activation: `WINGS_ENGINE_PATCH_OPTIONS='{"vllm":{"version":"0.19.0","features":["ears"]}}'`
+- smoke action: import the exact runner module chosen by the `v0_19_0` hook layer and instantiate or patch the smallest supported test double needed to prove hook registration is still valid
+- pass criteria:
+  - startup does not crash
+  - the hook registers against the intended `0.19.0` symbol path
+  - a runner-shaped test object with supported `speculative_config.method in {"mtp", "suffix"}` can reach the EARS enablement path without touching unrelated backend surfaces
+
 ### 4. Performance benchmark
 
 Benchmark EARS in the `vllm-ascend 0.18.0rc1` container with on/off comparison.
@@ -310,8 +322,17 @@ Recommended target-container benchmark matrix:
 
 | Method | Model shape | Key speculative config |
 | --- | --- | --- |
-| `suffix` | single-device `Qwen3-8B` style serving | `{"method":"suffix","num_speculative_tokens":15}` |
-| `mtp` | multi-device `Qwen3.5-27B` style serving when required by the target model | `{"model":"<mtp draft or native mtp source>","method":"mtp","num_speculative_tokens":3}` |
+| `suffix` | `/data/Qwen3-8B`, single Ascend device, `-tp 1` | `{"method":"suffix","num_speculative_tokens":15}` |
+| `mtp` | `/data/Qwen3.5-27B`, two Ascend devices, `-tp 2` | `{"model":"/data/weight/Qwen3.5-27B-w8a8-mtp","method":"mtp","num_speculative_tokens":3}` |
+
+Required benchmark environment toggles:
+
+- **EARS off**
+  - `unset WINGS_ENGINE_PATCH_OPTIONS`
+  - `unset VLLM_EARS_TOLERANCE`
+- **EARS on**
+  - `export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend":{"version":"0.18.0rc1","features":["ears"]}}'`
+  - `export VLLM_EARS_TOLERANCE=0.5`
 
 The benchmark deliverable should be a new report that clearly separates:
 
