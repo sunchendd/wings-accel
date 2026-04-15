@@ -14,7 +14,7 @@ The repository does not yet expose a `v0_18_0rc1` patch set, registry entry, man
 Deliver explicit `vllm-ascend 0.18.0rc1` support in `wings-accel` for:
 
 - `draft_model` functional support
-- `ears` functional support for at least `mtp` and `suffix`
+- `ears` functional support for `mtp` and `suffix`
 - install/runtime metadata, registry wiring, and docs
 - repository tests plus container validation evidence
 - an EARS benchmark result that states whether the feature is merely functional or also beneficial
@@ -182,7 +182,7 @@ Success contract:
 
 ### 4. EARS migration for `mtp` and `suffix`
 
-The current Ascend EARS patch already treats `mtp`, `eagle3`, and `suffix` as supported methods. The `0.18.0rc1` migration should keep this contract unless the upstream runtime proves a method is structurally unsupported.
+The `0.18.0rc1` public EARS contract for this migration is intentionally narrowed to `mtp` and `suffix`.
 
 Migration strategy:
 
@@ -195,7 +195,12 @@ Acceptance scope:
 
 - `mtp` must work
 - `suffix` must work
-- `eagle3` may stay supported if upstream shape is unchanged, but the spec only requires proving `mtp` and `suffix`
+- `eagle3` is out of the `0.18.0rc1` public support contract unless it is explicitly revalidated later
+
+Implementation rule for `eagle3`:
+
+- if the migrated code can keep `eagle3` working with no extra branching, that is acceptable as an internal non-claimed path
+- manifest, README, and version-specific tests for `0.18.0rc1` must claim only the methods that are explicitly validated in this migration: `mtp` and `suffix`
 
 ### 5. Install and runtime interface preservation
 
@@ -252,6 +257,7 @@ Add or update tests for:
 - registry enablement for `0.18.0rc1`
 - standalone `draft_model`
 - combined `ears` + `draft_model`
+- `install.py --features` acceptance for `0.18.0rc1`
 - `install.py --check` acceptance for `0.18.0rc1`
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm-ascend`
 - EARS supported-method contract including `mtp` and `suffix`
@@ -273,7 +279,7 @@ Container validation matrix:
 
 Required evidence:
 
-1. install or check path recognizes `0.18.0rc1`
+1. `python install.py --features ...` succeeds for the chosen feature set inside the container
 2. `python install.py --check --features ...` succeeds for the chosen feature set
 3. runtime patch activation logs appear for the enabled feature set
 4. `draft_model` path loads the drafter model or reaches the patched proposer path without version errors
@@ -312,7 +318,8 @@ Reasoning: this workload already has a proven benchmark shape in the repository 
 Secondary validation:
 
 - `mtp` needs only a functional smoke probe in this migration unless time and hardware availability allow a second benchmark pass
-- if `eagle3` is not validated on `0.18.0rc1`, manifest and README claims must be narrowed to the methods actually proven (`mtp` and `suffix`)
+- `eagle3` is not part of the `0.18.0rc1` claimed support set for this migration
+- the "without EARS" baseline is produced by unsetting `WINGS_ENGINE_PATCH_OPTIONS` and `VLLM_EARS_TOLERANCE`, matching the repository's existing benchmark method
 
 Minimum reporting shape:
 
@@ -342,4 +349,4 @@ If validation uncovers a tightly coupled fix, that fix may be committed separate
 - keep README examples explicit about `0.18.0rc1`
 - document that `vllm-ascend` support is functional-first, not performance-guaranteed
 - preserve `0.17.0rc1` examples so existing users are not broken
-- write container-validation and EARS benchmark evidence to a versioned doc under `docs/`, so the implementation commit history and the validation artifact stay aligned
+- write container-validation and EARS benchmark evidence to `docs/ears_benchmark_report_v0_18_0rc1.md`, so the implementation commit history and the validation artifact stay aligned
