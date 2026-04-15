@@ -286,6 +286,8 @@ Add or update tests for:
 - combined `ears` + `draft_model`
 - `install.py --features` acceptance for `0.18.0rc1`
 - `install.py --check` acceptance for `0.18.0rc1`
+- `install.py --features` rejection when both alias keys are supplied in the same payload
+- `install.py --check` rejection when both alias keys are supplied in the same payload
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm-ascend`
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm_ascend`
 - `_auto_patch.py` rejection when both alias keys are supplied in the same payload
