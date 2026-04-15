@@ -37,7 +37,7 @@ def _build_vllm_v0_17_0_features():
 
 
 def _build_vllm_v0_19_0_features():
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import (
+    from wings_engine_patch.patch_vllm_container.v0_19_0 import (
         ears_patch,
     )
 
