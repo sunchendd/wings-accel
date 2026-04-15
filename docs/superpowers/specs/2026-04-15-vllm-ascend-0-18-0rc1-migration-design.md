@@ -114,6 +114,7 @@ Default-version policy:
 - `0.18.0rc1` becomes the default `vllm-ascend` patch version
 - `0.17.0rc1` remains supported as an explicit older version entry
 - future-version fallback for `vllm-ascend` should therefore land on `0.18.0rc1`, not `0.17.0rc1`
+- a request for stable `0.18.0` must still be rejected as an unvalidated stable tag when only `0.18.0rc1` is registered
 
 The registry continues to resolve by explicit version string. No silent remapping from `0.18.0rc1` back to `0.17.0rc1`.
 
@@ -201,7 +202,9 @@ Acceptance scope:
 Unsupported-method rule:
 
 - unsupported methods must not enable the EARS sampler
-- runtime should remain stable if an unsupported method is requested, but no EARS activation log or support claim should appear
+- runtime should remain stable if an unsupported method is requested
+- the patch layer should emit one visible warning to stderr or structured logs that the requested speculative method is unsupported for `vllm-ascend 0.18.0rc1`
+- no EARS activation log or support claim should appear for that request
 - manifest, README, and version-specific tests for `0.18.0rc1` must claim only `mtp` and `suffix`
 
 ### 5. Install and runtime interface preservation
@@ -358,6 +361,7 @@ If validation uncovers a tightly coupled fix, that fix may be committed separate
 
 - keep README examples explicit about `0.18.0rc1`
 - update both `README.md` and `docs/README.md`
+- if a packaged or module-local README mirrors user examples, update that copy too
 - document that `vllm-ascend` support is functional-first, not performance-guaranteed
 - preserve `0.17.0rc1` examples so existing users are not broken
 - write container-validation and EARS benchmark evidence to `docs/ears_benchmark_report_v0_18_0rc1.md`, so the implementation commit history and the validation artifact stay aligned
