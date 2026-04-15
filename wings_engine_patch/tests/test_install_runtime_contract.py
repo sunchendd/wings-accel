@@ -155,7 +155,7 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
     )
     monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
 
-    def fake_install_engine(engine_name, version, features, dry_run=False):
+    def fake_install_engine(engine_name, version, features, dry_run=False, **_kwargs):
         calls.append((engine_name, version, features, dry_run))
 
     monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
