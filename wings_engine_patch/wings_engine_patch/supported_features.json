@@ -37,7 +37,7 @@
           "is_default": true,
           "features": {
             "ears": {
-              "description": "Enable runtime patching for vllm-ascend 0.18.0rc1 while the Ascend EARS 0.18 contract finishes migrating."
+              "description": "Enable entropy-adaptive rejection sampling for mtp and suffix speculative decoding on vllm-ascend 0.18.0rc1; unsupported methods such as eagle3 remain on the native sampler with a warning"
             },
             "draft_model": {
               "description": "Enable functional draft_model speculative decoding for vllm-ascend on 0.18.0rc1 without a performance guarantee"

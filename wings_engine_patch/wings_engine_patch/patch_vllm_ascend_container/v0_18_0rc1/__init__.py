@@ -4,6 +4,7 @@ __all__ = [
     "draft_model_patch",
     "ears_patch",
     "patch_vllm_draft_model",
+    "patch_vllm_ears",
 ]
 
 from importlib import import_module
@@ -18,4 +19,8 @@ def __getattr__(name):
         from .draft_model_patch import patch_vllm_draft_model
 
         return patch_vllm_draft_model
+    if name == "patch_vllm_ears":
+        from .ears_patch import patch_vllm_ears
+
+        return patch_vllm_ears
     raise AttributeError(name)

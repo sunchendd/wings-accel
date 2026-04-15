@@ -69,7 +69,7 @@ export WINGS_ENGINE_PATCH_OPTIONS='{
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
-`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry also exists for `0.18.0rc1`, and `["ears", "draft_model"]` can be wired together through the same JSON payload while the Ascend EARS 0.18 runtime contract continues migrating.
+`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry on `0.18.0rc1` is now limited to `mtp` and `suffix`; `eagle3` leaves the native sampler in place and logs a warning. `["ears", "draft_model"]` can be wired together through the same JSON payload.
 
 The corresponding install command is:
 
