@@ -12,6 +12,12 @@ PACKAGE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(PACKAGE_ROOT)
 
 
+def _purge_patch_common_modules():
+    for name in list(sys.modules):
+        if name == "wings_engine_patch.patch_common" or name.startswith("wings_engine_patch.patch_common."):
+            del sys.modules[name]
+
+
 def _purge_wings_engine_patch_modules():
     for name in list(sys.modules):
         if name == "wings_engine_patch" or name.startswith("wings_engine_patch."):
@@ -23,6 +29,13 @@ def _load_ears_patch_module():
     from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
 
     return ears_patch
+
+
+def _load_ears_core_module():
+    _purge_patch_common_modules()
+    from wings_engine_patch.patch_common import ears_core
+
+    return ears_core
 
 
 def patch_vllm_ears_registers(module_name):
@@ -40,6 +53,119 @@ def patch_vllm_ears_registers(module_name):
         ears_patch.patch_vllm_ears()
 
     return any(registered_module_name == module_name for registered_module_name, _ in registered_hooks)
+
+
+class TestSharedEarsCore(unittest.TestCase):
+    def test_supported_ears_methods_constant(self):
+        ears_core = _load_ears_core_module()
+
+        self.assertEqual(
+            ears_core.SUPPORTED_EARS_METHODS,
+            {"mtp", "eagle3", "suffix"},
+        )
+
+    def test_parse_ears_tolerance_with_empty_config(self):
+        ears_core = _load_ears_core_module()
+
+        self.assertEqual(ears_core.parse_ears_tolerance({}), 0.0)
+
+    def test_parse_ears_tolerance_with_env_var(self):
+        ears_core = _load_ears_core_module()
+
+        with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.3"}, clear=False):
+            tolerance = ears_core.parse_ears_tolerance({})
+
+        self.assertEqual(tolerance, 0.3)
+
+    def test_parse_ears_tolerance_with_vllm_ascend_envs(self):
+        ears_core = _load_ears_core_module()
+
+        fake_envs_module = types.SimpleNamespace(VLLM_EARS_TOLERANCE=0.7)
+        with mock.patch.dict(sys.modules, {"vllm_ascend.envs": fake_envs_module}, clear=False):
+            tolerance = ears_core.parse_ears_tolerance({})
+
+        self.assertEqual(tolerance, 0.7)
+
+    def test_maybe_enable_sampler_with_supported_method_and_positive_tolerance(self):
+        ears_core = _load_ears_core_module()
+
+        fake_runner = types.SimpleNamespace(
+            speculative_config=types.SimpleNamespace(method="suffix"),
+            rejection_sampler=object(),
+            sampler=object(),
+        )
+        with mock.patch.object(ears_core, "get_entropy_adaptive_rejection_sampler_class", return_value=mock.Mock):
+            result = ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.5)
+
+        self.assertTrue(result)
+
+    def test_maybe_enable_sampler_with_unknown_method(self):
+        ears_core = _load_ears_core_module()
+
+        fake_runner = types.SimpleNamespace(
+            speculative_config=types.SimpleNamespace(method="unknown"),
+            rejection_sampler=object(),
+            sampler=object(),
+        )
+        result = ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.5)
+
+        self.assertFalse(result)
+
+    def test_maybe_enable_sampler_with_mtp_and_zero_tolerance(self):
+        ears_core = _load_ears_core_module()
+
+        fake_runner = types.SimpleNamespace(
+            speculative_config=types.SimpleNamespace(method="mtp"),
+            rejection_sampler=object(),
+            sampler=object(),
+        )
+        result = ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.0)
+
+        self.assertFalse(result)
+
+    def test_maybe_enable_sampler_without_required_fields(self):
+        ears_core = _load_ears_core_module()
+
+        fake_runner = types.SimpleNamespace(speculative_config=None)
+        result = ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.5)
+
+        self.assertFalse(result)
+
+    def test_maybe_enable_sampler_already_wrapped(self):
+        ears_core = _load_ears_core_module()
+
+        class FakeEarsSampler:
+            pass
+
+        with mock.patch.object(
+            ears_core,
+            "get_entropy_adaptive_rejection_sampler_class",
+            return_value=FakeEarsSampler,
+        ):
+            fake_runner = types.SimpleNamespace(
+                speculative_config=types.SimpleNamespace(method="suffix"),
+                rejection_sampler=FakeEarsSampler(),
+                sampler=object(),
+            )
+            result = ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.5)
+
+        self.assertFalse(result)
+
+    def test_maybe_enable_sampler_raises_runtime_error_on_exception(self):
+        ears_core = _load_ears_core_module()
+
+        fake_runner = types.SimpleNamespace(
+            speculative_config=types.SimpleNamespace(method="suffix"),
+            rejection_sampler=object(),
+            sampler=object(),
+        )
+
+        def raising_factory():
+            raise ValueError("factory failed")
+
+        with mock.patch.object(ears_core, "get_entropy_adaptive_rejection_sampler_class", side_effect=raising_factory):
+            with self.assertRaises(RuntimeError):
+                ears_core.maybe_enable_sampler(fake_runner, base_tolerance=0.5)
 
 
 class TestEarsPatchModule(unittest.TestCase):
@@ -109,6 +235,7 @@ class TestEarsPatchModule(unittest.TestCase):
 
     def test_entropy_adaptive_sampler_delegates_greedy_requests_to_native_sampler(self):
         ears_patch = _load_ears_patch_module()
+        ears_core = _load_ears_core_module()
 
         @dataclasses.dataclass
         class FakeSamplingMetadata:
@@ -148,11 +275,11 @@ class TestEarsPatchModule(unittest.TestCase):
         fake_vllm_pkg = types.ModuleType("vllm")
         fake_vllm_pkg.v1 = fake_v1_pkg
 
-        original_factory = ears_patch._EARS_REJECTION_SAMPLER_CLASS  # pylint: disable=protected-access
-        original_torch = ears_patch._torch  # pylint: disable=protected-access
+        original_factory = ears_core._EARS_REJECTION_SAMPLER_CLASS  # pylint: disable=protected-access
+        original_torch = ears_core._torch  # pylint: disable=protected-access
         try:
-            ears_patch._EARS_REJECTION_SAMPLER_CLASS = None  # pylint: disable=protected-access
-            ears_patch._torch = lambda: types.SimpleNamespace(float32="float32")  # pylint: disable=protected-access
+            ears_core._EARS_REJECTION_SAMPLER_CLASS = None  # pylint: disable=protected-access
+            ears_core._torch = lambda: types.SimpleNamespace(float32="float32")  # pylint: disable=protected-access
             with mock.patch.dict(
                 sys.modules,
                 {
@@ -164,7 +291,7 @@ class TestEarsPatchModule(unittest.TestCase):
                 },
                 clear=False,
             ):
-                sampler_cls = ears_patch._get_entropy_adaptive_rejection_sampler_class()  # pylint: disable=protected-access
+                sampler_cls = ears_core.get_entropy_adaptive_rejection_sampler_class()  # pylint: disable=protected-access
 
             wrapped_sampler = mock.Mock(side_effect=AssertionError("greedy path should not invoke wrapped sampler"))
             rejection_sampler = sampler_cls(wrapped_sampler, base_tolerance=0.5)
@@ -189,8 +316,8 @@ class TestEarsPatchModule(unittest.TestCase):
             self.assertEqual(len(rejection_sampler.forward_calls), 1)
             wrapped_sampler.assert_not_called()
         finally:
-            ears_patch._EARS_REJECTION_SAMPLER_CLASS = original_factory  # pylint: disable=protected-access
-            ears_patch._torch = original_torch  # pylint: disable=protected-access
+            ears_core._EARS_REJECTION_SAMPLER_CLASS = original_factory  # pylint: disable=protected-access
+            ears_core._torch = original_torch  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":
