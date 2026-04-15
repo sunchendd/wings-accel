@@ -156,8 +156,6 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
     def test_supported_method_replaces_sampler_on_fake_npu_runner(self):
         _purge_patch_common_modules()  # Purge first
         ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
-        # Don't reload ears_core
-        from wings_engine_patch.patch_common import ears_core
 
         self.assertIsNotNone(ears_patch)
         self.assertIsNotNone(ears_ascend_runtime_hooks)
@@ -181,7 +179,11 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
         def fake_factory():
             return FakeEarsSampler
 
-        with mock.patch.object(ears_core, "get_entropy_adaptive_rejection_sampler_class", side_effect=fake_factory):
+        with mock.patch.object(
+            ears_patch,
+            "_get_entropy_adaptive_rejection_sampler_class",
+            side_effect=fake_factory,
+        ):
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                 ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
                 runner = fake_npu_module.NPUModelRunner()

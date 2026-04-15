@@ -327,11 +327,11 @@ class TestVllm019VersionMatrix(unittest.TestCase):
         self.assertIn("mtp", description)
         self.assertNotIn("eagle3", description)
 
-    def test_manifest_vllm_ascend_0180rc1_features_ears_only(self):
+    def test_manifest_vllm_ascend_0180rc1_features_public_surface(self):
         manifest = load_supported_features()
         self.assertEqual(
             sorted(manifest["engines"]["vllm-ascend"]["versions"]["0.18.0rc1"]["features"]),
-            ["ears"]
+            ["draft_model", "ears"]
         )
 
     def test_resolve_vllm_0191_falls_back_to_0190(self):

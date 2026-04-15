@@ -46,6 +46,11 @@ class TestWingsPatchMechanism(unittest.TestCase):
         # Restore registry
         registry_v1._registered_patches = self.original_registry
 
+    def _enable_with_fake_wrapt(self, engine_name, features, version):
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        with patch.dict(sys.modules, {"wrapt": fake_wrapt}, clear=False):
+            return registry_v1.enable(engine_name, features, version=version)
+
     def test_01_version_exact_match(self):
         """Test that a patch is applied when the version matches exactly."""
         registry_v1.enable('test_engine', ['feature_match'], version='1.0.0')
@@ -134,24 +139,24 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
     def test_enable_accepts_vllm_ascend_alias(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.18.0rc1')
+            failures = self._enable_with_fake_wrapt('vllm-ascend', ['draft_model'], version='0.18.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_accepts_vllm_underscore_ascend_alias(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            failures = registry_v1.enable('vllm_ascend', ['draft_model'], version='0.18.0rc1')
+            failures = self._enable_with_fake_wrapt('vllm_ascend', ['draft_model'], version='0.18.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_accepts_vllm_ascend_0180rc1(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.18.0rc1')
+            failures = self._enable_with_fake_wrapt('vllm-ascend', ['draft_model'], version='0.18.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_future_vllm_ascend_release_falls_back_to_default_rc1(self):
         captured = io.StringIO()
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
             with patch("sys.stderr", captured):
-                failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.18.1')
+                failures = self._enable_with_fake_wrapt('vllm-ascend', ['draft_model'], version='0.18.1')
         self.assertEqual(failures, [])
         self.assertIn("Trying default patch set '0.18.0rc1'", captured.getvalue())
 
@@ -163,12 +168,12 @@ class TestWingsPatchMechanism(unittest.TestCase):
 
     def test_enable_standalone_draft_model_feature(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.18.0rc1')
+            failures = self._enable_with_fake_wrapt('vllm-ascend', ['draft_model'], version='0.18.0rc1')
         self.assertEqual(failures, [])
 
     def test_enable_ears_and_draft_model_together(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            failures = registry_v1.enable('vllm-ascend', ['ears', 'draft_model'], version='0.18.0rc1')
+            failures = self._enable_with_fake_wrapt('vllm-ascend', ['ears', 'draft_model'], version='0.18.0rc1')
         self.assertEqual(failures, [])
 
 
