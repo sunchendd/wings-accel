@@ -174,6 +174,13 @@ class TestAutoPatchSubprocess(unittest.TestCase):
     ADAPTIVE_DRAFT_OPTIONS = '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
     ADAPTIVE_DRAFT_LOG = '[wins-accel] ears patch enabled'
     ADAPTIVE_DRAFT_WARNING = "Feature 'ears' not found in registry"
+    ASCEND_DRAFT_OPTIONS = '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+    ASCEND_FUTURE_DRAFT_OPTIONS = '{"vllm-ascend": {"version": "0.18.1", "features": ["draft_model"]}}'
+    ASCEND_DUPLICATE_ALIAS_OPTIONS = (
+        '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}, '
+        '"vllm_ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+    )
+    ASCEND_DRAFT_LOG = '[wins-accel] draft_model patch enabled'
     PATCH_FAILURE_LOG = '[Wings Engine Patch] Patch failed'
     PATCH_EXECUTION_ERROR_LOG = '[Wings Engine Patch] Error executing patch'
 
@@ -289,6 +296,28 @@ class TestAutoPatchSubprocess(unittest.TestCase):
             stderr,
             f"Expected ears startup log in stderr, got:\n{stderr}",
         )
+
+    def test_auto_patch_vllm_ascend_future_version_warns_and_falls_back(self):
+        code = "import wings_engine_patch._auto_patch; print('startup_probe')"
+        rc, stdout, stderr = _run_python(
+            code,
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ASCEND_FUTURE_DRAFT_OPTIONS},
+        )
+        self.assertEqual(rc, 0, f"Ascend future-version fallback should succeed. stdout={stdout!r} stderr={stderr!r}")
+        self.assertIn("startup_probe", stdout)
+        self.assertIn("newer than highest validated version", stderr)
+        self.assertIn("Trying default patch set '0.18.0rc1'", stderr)
+        self.assertIn(self.ASCEND_DRAFT_LOG, stderr)
+
+    def test_auto_patch_vllm_ascend_duplicate_aliases_fail_clearly(self):
+        code = "import wings_engine_patch._auto_patch; print('should_not_reach')"
+        rc, stdout, stderr = _run_python(
+            code,
+            env_extra={"WINGS_ENGINE_PATCH_OPTIONS": self.ASCEND_DUPLICATE_ALIAS_OPTIONS},
+        )
+        self.assertNotEqual(rc, 0, "Duplicate aliases should fail the process")
+        self.assertNotIn("should_not_reach", stdout)
+        self.assertIn("duplicate engine alias keys are not allowed", stderr)
 
 # ---------------------------------------------------------------------------
 # Main

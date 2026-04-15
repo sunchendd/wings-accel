@@ -191,6 +191,56 @@ def test_vllm_ascend_stable_tag_is_rejected():
         )
 
 
+def test_vllm_ascend_future_release_falls_back_to_default_rc1(monkeypatch):
+    manifest_data = install_module.load_supported_features()
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+
+    resolved_version, version_spec = install_module.resolve_version(
+        "vllm-ascend",
+        "0.18.1",
+        manifest_data["engines"]["vllm-ascend"],
+    )
+
+    assert resolved_version == "0.18.0rc1"
+    assert set(version_spec["features"].keys()) == {"ears", "draft_model"}
+    assert "newer than the highest validated version" in captured_stderr.getvalue()
+
+
+def test_duplicate_vllm_ascend_aliases_are_rejected_before_install(monkeypatch):
+    captured_stderr = io.StringIO()
+    install_calls = []
+
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            (
+                '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}, '
+                '"vllm_ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+            ),
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+    monkeypatch.setattr(
+        install_module,
+        "install_engine",
+        lambda engine_name, version, features, dry_run=False: install_calls.append(
+            (engine_name, version, tuple(features), dry_run)
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        install_module.main()
+
+    assert install_calls == []
+    assert "duplicate engine alias keys are not allowed" in captured_stderr.getvalue()
+
+
 def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_arctic(
     monkeypatch, tmp_path
 ):
