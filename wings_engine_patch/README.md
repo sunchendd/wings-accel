@@ -28,6 +28,7 @@ make install     # build + pip install into current environment
 ```bash
 python install.py --install-runtime-deps
 python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
 ```
 
 **Manual (advanced):**
@@ -55,20 +56,26 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `ears` patch for `vllm` version `0.17.0` on Ascend or NVIDIA:
+Canonical `vllm-ascend` example (`0.18.0rc1` is the default patch set; `0.17.0rc1` remains available only when explicitly requested):
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{
-    "vllm": {
-        "version": "0.17.0",
-        "features": ["ears"]
+    "vllm-ascend": {
+        "version": "0.18.0rc1",
+        "features": ["draft_model"]
     }
 }'
 
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
-`ears` is the only public vLLM `0.17.0` feature in this delivery. It provides functional support for `mtp`, `eagle3`, and `suffix` speculative decoding on NVIDIA and Ascend. Ascend support is correctness-oriented only and does not include a performance guarantee. `sparse_kv` is intentionally excluded from this delivery.
+`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry also exists for `0.18.0rc1`, and `["ears", "draft_model"]` can be wired together through the same JSON payload while the Ascend EARS 0.18 runtime contract continues migrating.
+
+The corresponding install command is:
+
+```bash
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+```
 
 > **Note**: If the configured version matches the installed engine version, patches are applied. If there is a mismatch, the system may attempt to fall back to a default version configuration if one is defined in the registry.
 

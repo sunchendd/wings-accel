@@ -54,6 +54,24 @@ def _build_vllm_ascend_v0_17_0_features():
     }
 
 
+def _build_vllm_ascend_v0_18_0_features():
+    from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import (
+        draft_model_patch,
+        ears_patch,
+    )
+
+    return {
+        "features": {
+            "ears": [
+                ears_patch.patch_vllm_ears,
+            ],
+            "draft_model": [
+                draft_model_patch.patch_vllm_draft_model,
+            ],
+        }
+    }
+
+
 _ENGINE_ALIASES = {
     "vllm": "vllm",
     "vllm-ascend": "vllm-ascend",
@@ -73,8 +91,12 @@ _registered_patches = {
     },
     'vllm-ascend': {
         "0.17.0rc1": {
-            'is_default': True,
+            'is_default': False,
             'builder': _build_vllm_ascend_v0_17_0_features
+        },
+        "0.18.0rc1": {
+            'is_default': True,
+            'builder': _build_vllm_ascend_v0_18_0_features
         }
     }
 }

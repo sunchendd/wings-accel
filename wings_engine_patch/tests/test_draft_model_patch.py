@@ -22,7 +22,7 @@ def _purge_wings_engine_patch_modules():
 def _load_draft_model_patch():
     _purge_wings_engine_patch_modules()
     return importlib.import_module(
-        "wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1.draft_model_patch"
+        "wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1.draft_model_patch"
     )
 
 
@@ -31,7 +31,7 @@ class TestDraftModelPatch(unittest.TestCase):
         _purge_wings_engine_patch_modules()
 
         with mock.patch.dict(sys.modules, {"torch": None}):
-            from wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1 import (
+            from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import (
                 patch_vllm_draft_model,
             )
 

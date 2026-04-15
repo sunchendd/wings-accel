@@ -23,13 +23,24 @@
       "description": "Ascend-specific vLLM Inference Engine",
       "versions": {
         "0.17.0rc1": {
-          "is_default": true,
+          "is_default": false,
           "features": {
             "ears": {
               "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on vllm-ascend 0.17.0rc1"
             },
             "draft_model": {
               "description": "Enable functional draft_model speculative decoding for vllm-ascend on 0.17.0rc1 without a performance guarantee"
+            }
+          }
+        },
+        "0.18.0rc1": {
+          "is_default": true,
+          "features": {
+            "ears": {
+              "description": "Enable runtime patching for vllm-ascend 0.18.0rc1 while the Ascend EARS 0.18 contract finishes migrating."
+            },
+            "draft_model": {
+              "description": "Enable functional draft_model speculative decoding for vllm-ascend on 0.18.0rc1 without a performance guarantee"
             }
           }
         }
