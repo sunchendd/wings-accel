@@ -164,17 +164,45 @@ As with NVIDIA, the hook target is whichever `0.18.0rc1` control point finishes 
 
 Keep Ascend-only compatibility logic separate from the generic sampler core.
 
-This boundary exists for surfaces that are specific to `vllm-ascend` and not shared with base `vllm`, such as:
+**Owner module**
 
-- forward-context propagation
-- compilation/graph helpers used by speculative execution
-- attention or drafter helpers needed by `mtp` or `suffix`
+- `wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1.ears_ascend_compat`
 
-The exact import paths may differ from `0.17.0rc1`, but the compatibility boundary stays the same conceptually:
+**Single responsibility**
 
-- patch only Ascend-specific control points
-- make missing Ascend-only modules a safe no-op outside Ascend
-- keep functional compatibility separate from performance tuning
+- make the `vllm-ascend@0.18.0rc1` speculative runtime usable by EARS for `mtp` and `suffix`
+- do not own sampler math
+- do not own registry/manifest behavior
+- do not tune performance
+
+**Surface categories owned by this module**
+
+1. **context propagation** — preserve Ascend speculative-mode fields that must survive from request setup into execution
+2. **graph / compilation bridging** — preserve or adapt speculative graph parameters needed after the runtime enters Ascend compilation helpers
+3. **attention / drafter compatibility** — preserve Ascend-only helper behavior required for `mtp` or `suffix` to reach the native rejection-sampling stage
+
+The exact import paths may differ from `0.17.0rc1`, but this module is still a bounded unit because it is defined by those three surface categories, not by an open-ended list of random Ascend patches.
+
+**Interface contract**
+
+- **Input:** imported Ascend-only runtime modules that fall into one of the three owned surface categories
+- **Output:** patched module/class state only; no new public feature flags and no return-value contract for callers
+- **Entry point:** one public function in the owner module registers all Ascend compatibility hooks for `0.18.0rc1`
+- **Failure model:** safe no-op when a targeted Ascend-only module is absent outside Ascend; explicit exception propagation when a targeted `0.18.0rc1` module is present but patching fails
+
+**Acceptance criteria**
+
+- repeated registration is idempotent
+- base `vllm` environments do not fail if this module is imported
+- in the target container, `suffix` and `mtp` can both reach successful startup and inference with only the public `ears` feature enabled
+- the compatibility layer does not require any extra user-visible feature flag beyond `ears`
+
+**Out of scope**
+
+- graph-level optimization work
+- tolerance tuning
+- non-speculative Ascend runtime changes
+- adding support for speculative methods other than the scoped `mtp` / `suffix` requirements
 
 ### 5. Registry and manifest layer
 
@@ -277,6 +305,13 @@ Recommended baseline method, based on the existing valid benchmark reports:
 - `parallel=1`
 - `temperature=0.6`
 - `top_p=0.9` or `0.95`
+
+Recommended target-container benchmark matrix:
+
+| Method | Model shape | Key speculative config |
+| --- | --- | --- |
+| `suffix` | single-device `Qwen3-8B` style serving | `{"method":"suffix","num_speculative_tokens":15}` |
+| `mtp` | multi-device `Qwen3.5-27B` style serving when required by the target model | `{"model":"<mtp draft or native mtp source>","method":"mtp","num_speculative_tokens":3}` |
 
 The benchmark deliverable should be a new report that clearly separates:
 
