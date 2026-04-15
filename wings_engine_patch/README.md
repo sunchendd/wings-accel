@@ -28,6 +28,8 @@ make install     # build + pip install into current environment
 ```bash
 python install.py --install-runtime-deps
 python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 ```
 
 **Manual (advanced):**
@@ -55,7 +57,7 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `ears` patch for `vllm` version `0.19.0` on Ascend or NVIDIA:
+To enable the `ears` patch for `vllm` version `0.19.0` on NVIDIA:
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{
@@ -69,6 +71,31 @@ python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
 `ears` is the only public vLLM `0.19.0` feature in this delivery. It provides functional support for `mtp` and `suffix` speculative decoding on NVIDIA. Ascend support remains version-specific and correctness-oriented only; it does not include a performance guarantee.
+
+Canonical `vllm-ascend` examples (`0.18.0rc1` is the default patch set; `0.17.0rc1` remains available only when explicitly requested):
+
+```bash
+export WINGS_ENGINE_PATCH_OPTIONS='{
+    "vllm-ascend": {
+        "version": "0.18.0rc1",
+        "features": ["draft_model"]
+    }
+}'
+
+export WINGS_ENGINE_PATCH_OPTIONS='{
+    "vllm-ascend": {
+        "version": "0.18.0rc1",
+        "features": ["ears"]
+    }
+}'
+```
+
+`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry also exists for `0.18.0rc1`, and `["ears", "draft_model"]` can be wired together through the same JSON payload.
+
+```bash
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
+```
 
 > **Note**: If the configured version matches the installed engine version, patches are applied. If there is a mismatch, the system may attempt to fall back to a default version configuration if one is defined in the registry.
 

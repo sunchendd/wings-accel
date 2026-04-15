@@ -69,7 +69,8 @@ def _build_vllm_ascend_v0_17_0_features():
 
 
 def _build_vllm_ascend_v0_18_0_features():
-    from wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1 import (
+    from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import (
+        draft_model_patch,
         ears_patch,
     )
 
@@ -77,6 +78,9 @@ def _build_vllm_ascend_v0_18_0_features():
         "features": {
             "ears": [
                 ears_patch.patch_vllm_ears,
+            ],
+            "draft_model": [
+                draft_model_patch.patch_vllm_draft_model,
             ],
         }
     }

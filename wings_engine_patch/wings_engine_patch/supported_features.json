@@ -46,6 +46,10 @@
           "features": {
             "ears": {
               "description": "Enable entropy-adaptive rejection sampling for mtp, eagle3, and suffix speculative decoding on vllm-ascend 0.18.0rc1"
+              "description": "Enable functional draft_model speculative decoding for vllm-ascend on 0.18.0rc1 without a performance guarantee"
+            },
+            "draft_model": {
+              "description": "Enable functional draft_model speculative decoding for vllm-ascend on 0.18.0rc1 without a performance guarantee"
             }
           }
         }

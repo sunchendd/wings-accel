@@ -11,12 +11,35 @@ try:
         from .registry import enable
         from .registry_v1 import normalize_engine_name
 
+        def _find_duplicate_engine_aliases(engine_configs):
+            grouped_keys = {}
+            for engine_name in engine_configs:
+                canonical_engine_name = normalize_engine_name(engine_name)
+                grouped_keys.setdefault(canonical_engine_name, []).append(engine_name)
+            return {
+                canonical_engine_name: alias_keys
+                for canonical_engine_name, alias_keys in grouped_keys.items()
+                if len(alias_keys) > 1
+            }
+
         try:
             # Expected format (versioned dict):
             # {"vllm_ascend": {"version": "0.12.0", "features": ["soft_fp8"]}, ...}
             options = json.loads(env_options)
 
             if isinstance(options, dict):
+                duplicate_aliases = _find_duplicate_engine_aliases(options)
+                if duplicate_aliases:
+                    duplicates = ", ".join(
+                        f"{canonical_engine_name}: {sorted(alias_keys)}"
+                        for canonical_engine_name, alias_keys in sorted(duplicate_aliases.items())
+                    )
+                    print(
+                        "[Wings Engine Patch] Error: duplicate engine alias keys are not allowed in "
+                        f"WINGS_ENGINE_PATCH_OPTIONS: {duplicates}",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1)
                 for engine_key, config in options.items():
                     # Only support Dictionary with version info
                     if isinstance(config, dict):

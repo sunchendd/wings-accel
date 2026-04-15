@@ -95,6 +95,18 @@ def normalize_engine_name(engine_name: str) -> str:
     return _ENGINE_ALIASES.get(engine_name, engine_name)
 
 
+def find_duplicate_engine_aliases(engine_configs: dict) -> dict[str, list[str]]:
+    grouped_keys: dict[str, list[str]] = {}
+    for engine_name in engine_configs:
+        canonical_engine_name = normalize_engine_name(engine_name)
+        grouped_keys.setdefault(canonical_engine_name, []).append(engine_name)
+    return {
+        canonical_engine_name: alias_keys
+        for canonical_engine_name, alias_keys in grouped_keys.items()
+        if len(alias_keys) > 1
+    }
+
+
 # ---------------------------------------------------------------------------
 # supported_features.json helpers
 # ---------------------------------------------------------------------------
@@ -738,6 +750,18 @@ Examples:
 
     if not isinstance(features_config, dict):
         stderr_logger.error("[wings-accel] Error: --features must be a JSON object.")
+        sys.exit(1)
+
+    duplicate_aliases = find_duplicate_engine_aliases(features_config)
+    if duplicate_aliases:
+        duplicates = ", ".join(
+            f"{canonical_engine_name}: {sorted(alias_keys)}"
+            for canonical_engine_name, alias_keys in sorted(duplicate_aliases.items())
+        )
+        stderr_logger.error(
+            "[wings-accel] Error: duplicate engine alias keys are not allowed in --features: "
+            f"{duplicates}"
+        )
         sys.exit(1)
 
     engines_spec = data["engines"]
