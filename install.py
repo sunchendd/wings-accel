@@ -19,7 +19,7 @@ The --features JSON format:
     }
 
 Example:
-    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+    python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 
 Deployment layout (all files at the same level as install.py):
     install.py
@@ -674,9 +674,9 @@ def main() -> None:
         epilog="""
 Examples:
   python install.py --list
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}' --dry-run
-  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+  python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+  python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}' --dry-run
+  python install.py --check --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 """,
     )
     parser.add_argument(
