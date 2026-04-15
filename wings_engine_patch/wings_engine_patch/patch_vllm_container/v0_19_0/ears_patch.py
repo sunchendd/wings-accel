@@ -2,14 +2,13 @@ import logging
 import sys
 
 from wings_engine_patch.patch_common.ears_core import (
-    SUPPORTED_EARS_METHODS,
     get_entropy_adaptive_rejection_sampler_class as _get_entropy_adaptive_rejection_sampler_class,
     maybe_enable_sampler as _maybe_enable_ears_sampler_core,
     parse_ears_tolerance as _read_ears_tolerance,
 )
 
 LOGGER = logging.getLogger("wings_accel.ears")
-_SUPPORTED_EARS_METHODS = SUPPORTED_EARS_METHODS  # Re-export for backward compatibility
+_SUPPORTED_EARS_METHODS = {"mtp", "suffix"}
 
 
 def _torch():
@@ -55,9 +54,11 @@ def _register_or_apply_post_import_hook(module_name, patcher) -> None:
 
 def _maybe_enable_ears_sampler(runner) -> None:
     tolerance = _read_ears_tolerance({})
+    spec_config = getattr(runner, "speculative_config", None)
+    method = getattr(spec_config, "method", None)
+    if method not in _SUPPORTED_EARS_METHODS:
+        return
     if _maybe_enable_ears_sampler_core(runner, base_tolerance=tolerance):
-        spec_config = getattr(runner, "speculative_config", None)
-        method = getattr(spec_config, "method", None)
         log_runtime_state("ears sampler enabled", method=method, base_tolerance=tolerance)
 
 

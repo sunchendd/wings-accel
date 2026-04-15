@@ -105,7 +105,7 @@ class TestV019PackageSurface(unittest.TestCase):
         ears_patch, _ = _load_v019_modules()
         self.assertEqual(
             ears_patch._SUPPORTED_EARS_METHODS,  # pylint: disable=protected-access
-            {"mtp", "eagle3", "suffix"},
+            {"mtp", "suffix"},
         )
 
 
@@ -224,6 +224,25 @@ class TestV019NvidiaRuntimeHooks(unittest.TestCase):
         class FakeGPUModelRunner:
             def __init__(self):
                 self.speculative_config = types.SimpleNamespace(method="unsupported-drafter")
+                self.sampler = object()
+                self.rejection_sampler = original_sampler
+
+        fake_gpu_module = types.SimpleNamespace(GPUModelRunner=FakeGPUModelRunner)
+
+        with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.5"}, clear=False):
+            ears_nvidia_runtime_hooks._patch_vllm_gpu_model_runner_module(fake_gpu_module)  # pylint: disable=protected-access
+            runner = fake_gpu_module.GPUModelRunner()
+
+        self.assertIs(runner.rejection_sampler, original_sampler)
+
+    def test_gpu_model_runner_keeps_native_sampler_for_eagle3_on_v019(self):
+        _purge_patch_common_modules()
+        _ears_patch, ears_nvidia_runtime_hooks = _load_v019_modules()
+        original_sampler = object()
+
+        class FakeGPUModelRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(method="eagle3")
                 self.sampler = object()
                 self.rejection_sampler = original_sampler
 

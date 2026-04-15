@@ -306,6 +306,13 @@ class TestVllm019VersionMatrix(unittest.TestCase):
             ["ears"]
         )
 
+    def test_manifest_vllm_0190_ears_description_mentions_only_suffix_and_mtp(self):
+        manifest = load_supported_features()
+        description = manifest["engines"]["vllm"]["versions"]["0.19.0"]["features"]["ears"]["description"]
+        self.assertIn("suffix", description)
+        self.assertIn("mtp", description)
+        self.assertNotIn("eagle3", description)
+
     def test_manifest_vllm_ascend_0180rc1_features_ears_only(self):
         manifest = load_supported_features()
         self.assertEqual(
