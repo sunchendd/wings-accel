@@ -221,9 +221,9 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(set(data["engines"].keys()), {"vllm", "vllm-ascend"})
 
         versions = data["engines"]["vllm"]["versions"]
-        self.assertEqual(set(versions.keys()), {"0.17.0"})
+        self.assertEqual(set(versions.keys()), {"0.17.0", "0.19.0"})
         ascend_versions = data["engines"]["vllm-ascend"]["versions"]
-        self.assertEqual(set(ascend_versions.keys()), {"0.17.0rc1"})
+        self.assertEqual(set(ascend_versions.keys()), {"0.17.0rc1", "0.18.0rc1"})
 
         features = versions["0.17.0"]["features"]
         self.assertIn("ears", features)
@@ -232,7 +232,7 @@ class TestSupportedFeatureManifest(unittest.TestCase):
 
         ascend_features = ascend_versions["0.17.0rc1"]["features"]
         self.assertEqual(set(ascend_features.keys()), {"ears", "draft_model"})
-        self.assertTrue(ascend_versions["0.17.0rc1"]["is_default"])
+        self.assertFalse(ascend_versions["0.17.0rc1"]["is_default"])
         self.assertEqual(set(ascend_versions["0.17.0rc1"]["features"].keys()), {"ears", "draft_model"})
 
     def test_manifest_public_surface_excludes_merged_private_entries(self):
@@ -250,7 +250,7 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         data = load_supported_features()
         ver, spec = resolve_version("vllm-ascend", "0.17.0rc1", data["engines"]["vllm-ascend"])
         self.assertEqual(ver, "0.17.0rc1")
-        self.assertTrue(spec["is_default"])
+        self.assertFalse(spec["is_default"])
 
     def test_manifest_rejects_vllm_ascend_stable_tag_without_rc1(self):
         data = load_supported_features()
@@ -261,16 +261,16 @@ class TestSupportedFeatureManifest(unittest.TestCase):
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):
 
-    def test_manifest_future_patch_release_falls_back_to_0170(self):
+    def test_manifest_future_patch_release_falls_back_to_0190(self):
         data = load_supported_features()
-        ver, spec = resolve_version("vllm", "0.17.1", data["engines"]["vllm"])
-        self.assertEqual(ver, "0.17.0")
+        ver, spec = resolve_version("vllm", "0.19.1", data["engines"]["vllm"])
+        self.assertEqual(ver, "0.19.0")
         self.assertTrue(spec["is_default"])
 
-    def test_manifest_future_minor_release_falls_back_to_0170(self):
+    def test_manifest_future_minor_release_falls_back_to_0190(self):
         data = load_supported_features()
-        ver, spec = resolve_version("vllm", "0.18.0", data["engines"]["vllm"])
-        self.assertEqual(ver, "0.17.0")
+        ver, spec = resolve_version("vllm", "0.20.0", data["engines"]["vllm"])
+        self.assertEqual(ver, "0.19.0")
         self.assertTrue(spec["is_default"])
 
     def test_manifest_historical_version_rejects_older_vllm_release(self):
@@ -278,6 +278,50 @@ class TestCurrentVllmVersionPolicy(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             resolve_version("vllm", "0.12.0", data["engines"]["vllm"])
         self.assertIn("Historical versions are not supported", str(ctx.exception))
+
+
+class TestVllm019VersionMatrix(unittest.TestCase):
+    """Tests for vllm 0.19.0 and vllm-ascend 0.18.0rc1 version matrix."""
+
+    def test_manifest_vllm_0190_is_default(self):
+        manifest = load_supported_features()
+        self.assertTrue(manifest["engines"]["vllm"]["versions"]["0.19.0"]["is_default"])
+
+    def test_manifest_vllm_0170_is_not_default(self):
+        manifest = load_supported_features()
+        self.assertFalse(manifest["engines"]["vllm"]["versions"]["0.17.0"]["is_default"])
+
+    def test_manifest_vllm_ascend_0180rc1_is_default(self):
+        manifest = load_supported_features()
+        self.assertTrue(manifest["engines"]["vllm-ascend"]["versions"]["0.18.0rc1"]["is_default"])
+
+    def test_manifest_vllm_ascend_0170rc1_is_not_default(self):
+        manifest = load_supported_features()
+        self.assertFalse(manifest["engines"]["vllm-ascend"]["versions"]["0.17.0rc1"]["is_default"])
+
+    def test_manifest_vllm_0190_features_ears_only(self):
+        manifest = load_supported_features()
+        self.assertEqual(
+            sorted(manifest["engines"]["vllm"]["versions"]["0.19.0"]["features"]),
+            ["ears"]
+        )
+
+    def test_manifest_vllm_ascend_0180rc1_features_ears_only(self):
+        manifest = load_supported_features()
+        self.assertEqual(
+            sorted(manifest["engines"]["vllm-ascend"]["versions"]["0.18.0rc1"]["features"]),
+            ["ears"]
+        )
+
+    def test_resolve_vllm_0191_falls_back_to_0190(self):
+        manifest = load_supported_features()
+        resolved, spec = resolve_version("vllm", "0.19.1", manifest["engines"]["vllm"])
+        self.assertEqual(resolved, "0.19.0")
+
+    def test_resolve_vllm_ascend_0181rc1_falls_back_to_0180rc1(self):
+        manifest = load_supported_features()
+        resolved, spec = resolve_version("vllm-ascend", "0.18.1rc1", manifest["engines"]["vllm-ascend"])
+        self.assertEqual(resolved, "0.18.0rc1")
 
 
 def test_get_packaging_version_types_requires_runtime_deps():

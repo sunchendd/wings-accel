@@ -112,6 +112,40 @@ class TestPublicSurface(unittest.TestCase):
             (package_dir / "patch_vllm_ascend_container" / "v0_17_0").exists()
         )
 
+    def test_manifests_expose_vllm_0190_as_default(self):
+        root_manifest = json.loads(
+            (Path(PROJECT_ROOT) / "supported_features.json").read_text(encoding="utf-8")
+        )
+        package_manifest = json.loads(
+            (Path(PACKAGE_ROOT) / "wings_engine_patch" / "supported_features.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        for manifest_data in (root_manifest, package_manifest):
+            vllm_versions = manifest_data["engines"]["vllm"]["versions"]
+            self.assertIn("0.19.0", vllm_versions)
+            self.assertTrue(vllm_versions["0.19.0"]["is_default"])
+            self.assertFalse(vllm_versions["0.17.0"]["is_default"])
+            self.assertEqual(sorted(vllm_versions["0.19.0"]["features"]), ["ears"])
+
+    def test_manifests_expose_vllm_ascend_0180rc1_as_default(self):
+        root_manifest = json.loads(
+            (Path(PROJECT_ROOT) / "supported_features.json").read_text(encoding="utf-8")
+        )
+        package_manifest = json.loads(
+            (Path(PACKAGE_ROOT) / "wings_engine_patch" / "supported_features.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        for manifest_data in (root_manifest, package_manifest):
+            ascend_versions = manifest_data["engines"]["vllm-ascend"]["versions"]
+            self.assertIn("0.18.0rc1", ascend_versions)
+            self.assertTrue(ascend_versions["0.18.0rc1"]["is_default"])
+            self.assertFalse(ascend_versions["0.17.0rc1"]["is_default"])
+            self.assertEqual(sorted(ascend_versions["0.18.0rc1"]["features"]), ["ears"])
+
 
 if __name__ == "__main__":
     unittest.main()

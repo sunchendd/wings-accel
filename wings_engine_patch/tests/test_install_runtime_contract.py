@@ -150,12 +150,12 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
             "install.py",
             "--dry-run",
             "--features",
-            '{"vllm": {"version": "0.18.0", "features": ["ears"]}}',
+            '{"vllm": {"version": "0.20.0", "features": ["ears"]}}',
         ],
     )
     monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
 
-    def fake_install_engine(engine_name, version, features, dry_run=False):
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
         calls.append((engine_name, version, features, dry_run))
 
     monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
@@ -163,7 +163,7 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
     with suppress(SystemExit):
         install_module.main()
 
-    assert calls == [("vllm", "0.17.0", ["ears"], True)]
+    assert calls == [("vllm", "0.19.0", ["ears"], True)]
     assert "newer than the highest validated version" in captured_stderr.getvalue()
 
 
@@ -283,3 +283,64 @@ def test_find_arctic_inference_wheel_supports_flat_delivery_variants(tmp_path, m
     monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
 
     assert install_module._find_arctic_inference_whl() == arctic_wheel  # pylint: disable=protected-access
+
+
+def test_auto_patch_vllm_0191_falls_back_to_0190_with_ears(monkeypatch):
+    """When user specifies vllm 0.19.1 with ears, install.py warns and uses 0.19.0."""
+    import types
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            '{"vllm": {"version": "0.19.1", "features": ["ears"]}}',
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+
+    calls = []
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
+        calls.append((engine_name, version, features, dry_run))
+
+    monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
+
+    with suppress(SystemExit):
+        install_module.main()
+
+    assert calls == [("vllm", "0.19.0", ["ears"], True)]
+    stderr = captured_stderr.getvalue()
+    assert "Trying default version '0.19.0'" in stderr
+
+
+def test_auto_patch_vllm_ascend_0181rc1_falls_back_to_0180rc1_with_ears(monkeypatch):
+    """When user specifies vllm-ascend 0.18.1rc1 with ears, install.py warns and uses 0.18.0rc1."""
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            '{"vllm-ascend": {"version": "0.18.1rc1", "features": ["ears"]}}',
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+
+    calls = []
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
+        calls.append((engine_name, version, features, dry_run))
+
+    monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
+
+    with suppress(SystemExit):
+        install_module.main()
+
+    assert calls == [("vllm-ascend", "0.18.0rc1", ["ears"], True)]
+    stderr = captured_stderr.getvalue()
+    assert "Trying default version '0.18.0rc1'" in stderr

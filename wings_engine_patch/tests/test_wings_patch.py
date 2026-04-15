@@ -124,6 +124,14 @@ class TestWingsPatchMechanism(unittest.TestCase):
         self.assertEqual(set(feature_map.keys()), {"ears", "sparse_kv"})
         self.assertEqual(set(ascend_feature_map.keys()), {"ears", "draft_model"})
 
+    def test_registry_vllm_0190_is_default(self):
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            self.assertTrue(registry_v1._registered_patches["vllm"]["0.19.0"]["is_default"])  # pylint: disable=protected-access
+
+    def test_registry_vllm_ascend_0180rc1_is_default(self):
+        with patch.object(registry_v1, "_registered_patches", self.original_registry):
+            self.assertTrue(registry_v1._registered_patches["vllm-ascend"]["0.18.0rc1"]["is_default"])  # pylint: disable=protected-access
+
     def test_enable_accepts_vllm_ascend_alias(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
             failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0rc1')
@@ -314,7 +322,7 @@ class TestAutoPatchModule(unittest.TestCase):
     def test_auto_patch_future_patch_release_warns_and_falls_back(self):
         buf = io.StringIO()
         future_patch_options = json.dumps(
-            {'vllm': {'version': '0.17.1', 'features': ['ears']}}
+            {'vllm': {'version': '0.19.1', 'features': ['ears']}}
         )
         fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
         with patch('sys.stderr', buf):
@@ -322,8 +330,8 @@ class TestAutoPatchModule(unittest.TestCase):
                 self._run_auto_patch(future_patch_options)
 
         stderr = buf.getvalue()
-        self.assertIn("newer than highest validated version '0.17.0'", stderr)
-        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn("newer than highest validated version '0.19.0'", stderr)
+        self.assertIn("Trying default patch set '0.19.0'", stderr)
         self.assertIn(self.EARS_LOG, stderr)
 
     def test_auto_patch_normalizes_vllm_ascend_alias_before_enable(self):
@@ -382,6 +390,36 @@ class TestAutoPatchModule(unittest.TestCase):
         with patch.dict(os.environ, env_patch, clear=False):
             # Reload triggers the module-level try/except block again
             importlib.reload(ap_mod)
+
+    def test_auto_patch_vllm_0191_falls_back_to_0190(self):
+        """vllm 0.19.1 with ears should warn and fall back to 0.19.0."""
+        buf = io.StringIO()
+        future_patch_options = json.dumps(
+            {'vllm': {'version': '0.19.1', 'features': ['ears']}}
+        )
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        with patch('sys.stderr', buf):
+            with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                self._run_auto_patch(future_patch_options)
+
+        stderr = buf.getvalue()
+        self.assertIn("newer than highest validated version", stderr)
+        self.assertIn("Trying default patch set '0.19.0'", stderr)
+
+    def test_auto_patch_vllm_ascend_0181rc1_falls_back_to_0180rc1(self):
+        """vllm-ascend 0.18.1rc1 with ears should warn and fall back to 0.18.0rc1."""
+        buf = io.StringIO()
+        future_patch_options = json.dumps(
+            {'vllm-ascend': {'version': '0.18.1rc1', 'features': ['ears']}}
+        )
+        fake_wrapt = types.SimpleNamespace(register_post_import_hook=lambda *_args, **_kwargs: None)
+        with patch('sys.stderr', buf):
+            with patch.dict(sys.modules, {'wrapt': fake_wrapt}):
+                self._run_auto_patch(future_patch_options)
+
+        stderr = buf.getvalue()
+        self.assertIn("newer than highest validated version", stderr)
+        self.assertIn("Trying default patch set '0.18.0rc1'", stderr)
 
 
 if __name__ == '__main__':
