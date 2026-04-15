@@ -148,14 +148,15 @@ class TestPublicSurface(unittest.TestCase):
             self.assertFalse(ascend_versions["0.17.0rc1"]["is_default"])
             self.assertEqual(sorted(ascend_versions["0.18.0rc1"]["features"]), ["draft_model", "ears"])
 
-    def test_v0_18_0rc1_package_root_exports_public_draft_model_surface(self):
+    def test_v0_18_0rc1_package_root_exports_public_patch_surface(self):
         package = import_module("wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1")
 
         self.assertEqual(
             set(package.__all__),
-            {"draft_model_patch", "ears_patch", "patch_vllm_draft_model"},
+            {"draft_model_patch", "ears_patch", "patch_vllm_draft_model", "patch_vllm_ears"},
         )
         self.assertTrue(callable(package.patch_vllm_draft_model))
+        self.assertTrue(callable(package.patch_vllm_ears))
         self.assertEqual(
             package.draft_model_patch.__name__,
             "wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1.draft_model_patch",

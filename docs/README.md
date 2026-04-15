@@ -72,10 +72,10 @@ python install.py --list
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
 | vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
-| vllm-ascend | 0.18.0rc1 | ears | `vllm-ascend` 0.18.0rc1 已开放公共配置入口；Ascend 侧仍以功能可用为目标，不保证性能 |
+| vllm-ascend | 0.18.0rc1 | ears | 为 `vllm-ascend` 0.18.0rc1 的 `mtp` / `suffix` 投机解码启用 EARS；`eagle3` 不启用并打印 warning，不保证性能 |
 | vllm-ascend | 0.18.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
 | vllm-ascend | 0.17.0rc1 | ears / draft_model | 旧版补丁仍可显式指定，不再作为默认版本 |
-| vllm / vllm-ascend | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
+| vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
 
 ## vllm-ascend draft_model 用法
 
@@ -96,7 +96,7 @@ vllm serve /data/Qwen3-8B \
   --speculative-config '{"model":"/data/Qwen3-0.6B","method":"draft_model","num_speculative_tokens":8,"parallel_drafting":false}'
 ```
 
-`draft_model` 当前仅承诺功能正确性；如需旧版行为，可把版本改为 `0.17.0rc1`。组合启用 `ears` + `draft_model` 的配置入口也已打通：
+`draft_model` 当前仅承诺功能正确性；如需旧版行为，可把版本改为 `0.17.0rc1`。`ears` 在 `0.18.0rc1` 仅覆盖 `mtp` / `suffix`，若配置成 `eagle3` 会跳过 EARS 并打印 warning。组合启用 `ears` + `draft_model` 的配置入口也已打通：
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears", "draft_model"]}}'

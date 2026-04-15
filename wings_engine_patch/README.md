@@ -90,7 +90,7 @@ export WINGS_ENGINE_PATCH_OPTIONS='{
 }'
 ```
 
-`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry also exists for `0.18.0rc1`, and `["ears", "draft_model"]` can be wired together through the same JSON payload.
+`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry on `0.18.0rc1` is limited to `mtp` and `suffix`; `eagle3` leaves the native sampler in place and logs a warning. `["ears", "draft_model"]` can be wired together through the same JSON payload.
 
 ```bash
 python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'

@@ -24,9 +24,9 @@ def _purge_patch_common_modules():
 
 def _load_ascend_modules():
     _purge_wings_engine_patch_modules()
-    from wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1 import ears_patch
+    from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import ears_patch
     ears_ascend_runtime_hooks = importlib.import_module(
-        "wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1.ears_ascend_runtime_hooks"
+        "wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1.ears_ascend_runtime_hooks"
     )
 
     return ears_patch, ears_ascend_runtime_hooks
@@ -190,11 +190,8 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
         self.assertIsInstance(runner.rejection_sampler, FakeEarsSampler)
         self.assertEqual(runner.rejection_sampler.base_tolerance, 0.2)
 
-    def test_unsupported_method_keeps_native_sampler(self):
-        _purge_patch_common_modules()  # Purge first
+    def test_unsupported_method_keeps_native_sampler_and_logs_reason(self):
         ears_patch, ears_ascend_runtime_hooks = _load_ascend_modules()
-        # Don't reload ears_core
-        from wings_engine_patch.patch_common import ears_core
 
         self.assertIsNotNone(ears_patch)
         self.assertIsNotNone(ears_ascend_runtime_hooks)
@@ -211,13 +208,26 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
 
         fake_npu_module = types.SimpleNamespace(NPUModelRunner=FakeNPUModelRunner)
 
-        # No need to patch factory since method is unsupported
-        with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
-            ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
-            runner = fake_npu_module.NPUModelRunner()
-            getattr(runner, "_set_up_drafter")()
+        original_factory = ears_patch._get_entropy_adaptive_rejection_sampler_class  # pylint: disable=protected-access
+        try:
+            def fake_object_factory():
+                return object
 
-        self.assertIs(runner.rejection_sampler, original_sampler)
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
+            with mock.patch.object(ears_patch, "log_runtime_state") as log_runtime_state:
+                with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
+                    ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
+                    runner = fake_npu_module.NPUModelRunner()
+                    getattr(runner, "_set_up_drafter")()
+
+            self.assertIs(runner.rejection_sampler, original_sampler)
+            log_runtime_state.assert_called_once_with(
+                "ears sampler skipped (ascend)",
+                method="not-supported",
+                reason="unsupported speculative method",
+            )
+        finally:
+            ears_patch._get_entropy_adaptive_rejection_sampler_class = original_factory  # pylint: disable=protected-access
 
     def test_zero_tolerance_keeps_native_sampler(self):
         _purge_patch_common_modules()  # Purge first

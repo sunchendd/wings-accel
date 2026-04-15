@@ -26,7 +26,7 @@ def _purge_wings_engine_patch_modules():
 
 def _load_ears_patch_module():
     _purge_wings_engine_patch_modules()
-    from wings_engine_patch.patch_vllm_container.v0_17_0 import ears_patch
+    from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import ears_patch
 
     return ears_patch
 
@@ -174,7 +174,7 @@ class TestEarsPatchModule(unittest.TestCase):
 
         self.assertEqual(
             ears_patch._SUPPORTED_EARS_METHODS,  # pylint: disable=protected-access
-            {"mtp", "eagle3", "suffix"},
+            {"mtp", "suffix"},
         )
 
     def test_package_import_of_patch_vllm_ears_does_not_require_torch(self):
@@ -187,7 +187,7 @@ class TestEarsPatchModule(unittest.TestCase):
             return original_import(name, *args, **kwargs)
 
         with mock.patch("builtins.__import__", side_effect=fake_import):
-            from wings_engine_patch.patch_vllm_container.v0_17_0 import patch_vllm_ears
+            from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import patch_vllm_ears
 
         self.assertTrue(callable(patch_vllm_ears))
 
@@ -318,6 +318,26 @@ class TestEarsPatchModule(unittest.TestCase):
         finally:
             ears_core._EARS_REJECTION_SAMPLER_CLASS = original_factory  # pylint: disable=protected-access
             ears_core._torch = original_torch  # pylint: disable=protected-access
+
+    def test_unsupported_method_logs_warning_and_keeps_native_sampler(self):
+        ears_patch = _load_ears_patch_module()
+        original_sampler = object()
+
+        class FakeRunner:
+            def __init__(self):
+                self.speculative_config = types.SimpleNamespace(method="eagle3")
+                self.sampler = object()
+                self.rejection_sampler = original_sampler
+
+        with mock.patch.object(ears_patch, "log_runtime_state") as log_runtime_state:
+            with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.5"}, clear=False):
+                ears_patch._maybe_enable_ears_sampler(FakeRunner())  # pylint: disable=protected-access
+
+        log_runtime_state.assert_called_once_with(
+            "ears sampler skipped (ascend)",
+            method="eagle3",
+            reason="unsupported speculative method",
+        )
 
 
 if __name__ == "__main__":
