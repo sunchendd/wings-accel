@@ -145,7 +145,7 @@ Each unit should answer a single question:
 - `draft_model_patch.py`: what runtime hook is needed for `draft_model` on `0.18.0rc1`?
 - `ears_patch.py`: how does EARS become enabled for supported speculative methods?
 - `ears_ascend_compat.py`: which Ascend or upstream modules need compatibility shims?
-- `ears_ascend_runtime_hooks.py`: which runtime hooks should be installed and when?
+- `ears_ascend_runtime_hooks.py`: which runtime hooks should be installed and when, including `VLLM_EARS_TOLERANCE` env registration on Ascend?
 
 Shared helper reuse from `0.17.0rc1` is acceptable when the interface is unchanged. If a helper must be extracted, it should be extracted into a clearly named shared module rather than imported from a versioned package by side effect.
 
@@ -161,7 +161,7 @@ Public and private interfaces for the new package are explicit:
   - register runtime hooks using `ears_ascend_runtime_hooks.register_ascend_runtime_hooks`
 - `ears_ascend_runtime_hooks.py` exports one registration function:
   - `register_ascend_runtime_hooks(register_hook) -> None`
-  This function takes the hook registrar as input and performs no registry or manifest work.
+  This function takes the hook registrar as input, preserves the Ascend env-registration path for `VLLM_EARS_TOLERANCE`, and performs no registry or manifest work.
 - `ears_ascend_compat.py` exports one compatibility patch function:
   - `patch_vllm_ascend_draft_compat(module) -> None`
   This function patches only the imported module it receives and remains independently unit-testable.
@@ -245,6 +245,7 @@ Acceptance requires both public paths to be exercised:
 
 - install/check-time interface: `install.py --features ...` and `install.py --check --features ...`
 - runtime interface: Python startup with `WINGS_ENGINE_PATCH_OPTIONS`
+- if both `vllm-ascend` and `vllm_ascend` keys are supplied in the same config payload, validation should fail explicitly rather than picking one silently
 
 ### 6. Permission handling
 
@@ -287,9 +288,11 @@ Add or update tests for:
 - `install.py --check` acceptance for `0.18.0rc1`
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm-ascend`
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm_ascend`
+- `_auto_patch.py` rejection when both alias keys are supplied in the same payload
 - EARS supported-method contract including `mtp` and `suffix`
 - EARS non-activation for unsupported methods such as `eagle3` on `0.18.0rc1`
 - EARS warning emission for unsupported methods such as `eagle3` on `0.18.0rc1`
+- Ascend env-registration coverage for `VLLM_EARS_TOLERANCE`
 - `v0_18_0rc1.__init__` export-surface test
 - any new module-path or signature adaptation introduced for `0.18.0rc1`
 
@@ -385,3 +388,4 @@ If validation uncovers a tightly coupled fix, that fix may be committed separate
 - preserve `0.17.0rc1` examples so existing users are not broken
 - write container-validation and EARS benchmark evidence to `docs/ears_benchmark_report_v0_18_0rc1.md`, so the implementation commit history and the validation artifact stay aligned
 - if the required container image, models, or NPU hardware are unavailable in the current environment, implementation may still land the code and repository tests, but the validation doc must record the exact missing prerequisite instead of claiming container success
+- because the user explicitly requested container validation and EARS performance testing, missing container prerequisites block final completion/signoff even if repository code changes are otherwise ready
