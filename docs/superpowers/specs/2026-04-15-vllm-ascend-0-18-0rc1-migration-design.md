@@ -263,6 +263,9 @@ Add or update tests for:
 
 - support manifest listing `vllm-ascend@0.18.0rc1` with `ears` and `draft_model`
 - registry enablement for `0.18.0rc1`
+- registry default-version selection for `vllm-ascend`
+- future-version fallback landing on `0.18.0rc1`
+- stable `0.18.0` rejection when only `0.18.0rc1` is registered
 - registry/runtime alias acceptance for both `vllm-ascend` and `vllm_ascend`
 - standalone `draft_model`
 - combined `ears` + `draft_model`
@@ -272,6 +275,7 @@ Add or update tests for:
 - `_auto_patch.py` acceptance for runtime env keyed by `vllm_ascend`
 - EARS supported-method contract including `mtp` and `suffix`
 - EARS non-activation for unsupported methods such as `eagle3` on `0.18.0rc1`
+- EARS warning emission for unsupported methods such as `eagle3` on `0.18.0rc1`
 - `v0_18_0rc1.__init__` export-surface test
 - any new module-path or signature adaptation introduced for `0.18.0rc1`
 
@@ -289,6 +293,7 @@ Container validation matrix:
 | `ears + draft_model` combined smoke | target `/data/Qwen3-8B`, draft `/data/Qwen3-0.6B`, features `["ears","draft_model"]`, single NPU, `tp=1` | combined startup succeeds, no hook conflict, both feature logs are reachable |
 | `ears` `suffix` smoke | target `/data/Qwen3-8B`, `method="suffix"`, `num_speculative_tokens=15`, single NPU, `tp=1` | runtime starts and emits EARS activation log for `suffix` |
 | `ears` `mtp` smoke | target `/data/Qwen3.5-27B`, draft `/data/weight/Qwen3.5-27B-w8a8-mtp`, `method="mtp"`, `num_speculative_tokens=3`, dual NPU, `tp=2` | runtime starts and emits EARS activation log for `mtp` |
+| unsupported-method smoke | target `/data/Qwen3-8B`, `method="eagle3"` or another unclaimed method on `0.18.0rc1` | runtime stays up, emits the unsupported-method warning, does not emit EARS activation |
 
 Required evidence:
 
@@ -341,7 +346,7 @@ Minimum reporting shape:
 - model pair and main runtime flags
 - one baseline result without EARS
 - one result with EARS
-- conclusion: positive, neutral, or negative
+- conclusion: positive, neutral, or negative, determined primarily by output tokens/sec and secondarily checked against request latency
 
 The benchmark is informational. A neutral or negative result does not block the migration if functional validation passes.
 
