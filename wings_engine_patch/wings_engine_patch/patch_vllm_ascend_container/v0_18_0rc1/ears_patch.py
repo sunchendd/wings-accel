@@ -38,6 +38,12 @@ def log_runtime_state(event: str, /, **fields) -> None:
     LOGGER.info("[wins-accel] %s%s", event, suffix)
 
 
+def log_runtime_warning(event: str, /, **fields) -> None:
+    parts = [f"{key}={value}" for key, value in sorted(fields.items())]
+    suffix = f" {' '.join(parts)}" if parts else ""
+    LOGGER.warning("[wins-accel] %s%s", event, suffix)
+
+
 def _torch():
     import torch
 
@@ -464,7 +470,7 @@ def _maybe_enable_ears_sampler(runner) -> None:
     if tolerance <= 0.0:
         return
     if method not in _SUPPORTED_EARS_METHODS:
-        log_runtime_state(
+        log_runtime_warning(
             "ears sampler skipped (ascend)",
             method=method,
             reason="unsupported speculative method",

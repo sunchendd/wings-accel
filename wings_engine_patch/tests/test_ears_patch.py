@@ -329,14 +329,18 @@ class TestEarsPatchModule(unittest.TestCase):
                 self.sampler = object()
                 self.rejection_sampler = original_sampler
 
-        with mock.patch.object(ears_patch, "log_runtime_state") as log_runtime_state:
+        with self.assertLogs("wings_accel.ears_ascend", level="WARNING") as captured_logs:
             with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.5"}, clear=False):
                 ears_patch._maybe_enable_ears_sampler(FakeRunner())  # pylint: disable=protected-access
 
-        log_runtime_state.assert_called_once_with(
-            "ears sampler skipped (ascend)",
-            method="eagle3",
-            reason="unsupported speculative method",
+        self.assertIs(FakeRunner().rejection_sampler, original_sampler)
+        self.assertTrue(
+            any(
+                "ears sampler skipped (ascend)" in message
+                and "method=eagle3" in message
+                and "reason=unsupported speculative method" in message
+                for message in captured_logs.output
+            )
         )
 
 

@@ -214,17 +214,20 @@ class TestEarsAscendRuntimeHooks(unittest.TestCase):
                 return object
 
             ears_patch._get_entropy_adaptive_rejection_sampler_class = fake_object_factory  # pylint: disable=protected-access
-            with mock.patch.object(ears_patch, "log_runtime_state") as log_runtime_state:
+            with self.assertLogs("wings_accel.ears_ascend", level="WARNING") as captured_logs:
                 with mock.patch.dict(os.environ, {"VLLM_EARS_TOLERANCE": "0.2"}, clear=False):
                     ears_ascend_runtime_hooks._patch_vllm_ascend_model_runner_module(fake_npu_module)  # pylint: disable=protected-access
                     runner = fake_npu_module.NPUModelRunner()
                     getattr(runner, "_set_up_drafter")()
 
             self.assertIs(runner.rejection_sampler, original_sampler)
-            log_runtime_state.assert_called_once_with(
-                "ears sampler skipped (ascend)",
-                method="not-supported",
-                reason="unsupported speculative method",
+            self.assertTrue(
+                any(
+                    "ears sampler skipped (ascend)" in message
+                    and "method=not-supported" in message
+                    and "reason=unsupported speculative method" in message
+                    for message in captured_logs.output
+                )
             )
         finally:
             ears_patch._get_entropy_adaptive_rejection_sampler_class = original_factory  # pylint: disable=protected-access
