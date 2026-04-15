@@ -116,6 +116,14 @@ Default-version policy:
 - future-version fallback for `vllm-ascend` should therefore land on `0.18.0rc1`, not `0.17.0rc1`
 - a request for stable `0.18.0` must still be rejected as an unvalidated stable tag when only `0.18.0rc1` is registered
 
+Resolution precedence examples:
+
+- exact `0.18.0rc1` -> accepted as exact match
+- exact `0.17.0rc1` -> accepted as exact match
+- stable `0.18.0` -> rejected as "not a validated patched version"
+- future `0.18.1` -> warning + fallback to default `0.18.0rc1`
+- future `0.19.0rc1` or `0.19.0` -> warning + fallback to default `0.18.0rc1`
+
 The registry continues to resolve by explicit version string. No silent remapping from `0.18.0rc1` back to `0.17.0rc1`.
 
 ### 2. New version-isolated patch package
@@ -181,6 +189,12 @@ Success contract:
 - enabling only `draft_model` must not require `ears`
 - combined `["ears", "draft_model"]` must also remain valid
 - the patch should remain import-safe before heavy runtime dependencies are loaded
+
+Meaning of "combined":
+
+- combined means both features may be enabled in the patch registry and auto-patch environment at the same time without import-order or hook-registration conflicts
+- it does not require one speculative request to execute `draft_model` and EARS simultaneously
+- the concrete combined validation case is: enable features `["ears","draft_model"]`, start the server with `method="draft_model"`, and verify that `draft_model` still works while the presence of the `ears` feature does not break startup or runtime patching
 
 ### 4. EARS migration for `mtp` and `suffix`
 
