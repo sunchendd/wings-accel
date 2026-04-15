@@ -11,12 +11,14 @@ make build         # 产出 build/output/ 下的完整交付件
 # 2. 安装到推理环境
 cd build/output
 python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 3. 运行时启用
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
@@ -46,12 +48,14 @@ cd build/output
 python3 install.py --install-runtime-deps
 
 # 3. 安装补丁包（按上游 JSON 传参方式选择要启用的补丁）
-python3 install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 4. 运行前设置环境变量
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 5. 启动 vLLM
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
@@ -60,7 +64,7 @@ python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
 如果只想先检查安装命令，不实际执行，可以用：
 
 ```bash
-python3 install.py --dry-run --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --dry-run --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 ```
 
 ## 支持的引擎与特性
@@ -71,11 +75,13 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
-| vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
+| vllm | 0.19.0 | ears | 为 NVIDIA 上的 `mtp` 和 `suffix` 投机解码启用 EARS 拒绝采样（默认版本） |
 | vllm-ascend | 0.18.0rc1 | ears | 为 `vllm-ascend` 0.18.0rc1 的 `mtp` / `suffix` 投机解码启用 EARS；`eagle3` 不启用并打印 warning，不保证性能 |
 | vllm-ascend | 0.18.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
-| vllm-ascend | 0.17.0rc1 | ears / draft_model | 旧版补丁仍可显式指定，不再作为默认版本 |
+| vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
 | vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
+| vllm-ascend | 0.17.0rc1 | ears | 为 Ascend 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样；仅保证功能支持，不保证性能 |
+| vllm-ascend | 0.17.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
 
 ## vllm-ascend draft_model 用法
 
