@@ -109,7 +109,11 @@ Add `vllm-ascend@0.18.0rc1` as an explicit registered version with:
 - `ears`
 - `draft_model`
 
-`0.17.0rc1` remains supported and unchanged.
+Default-version policy:
+
+- `0.18.0rc1` becomes the default `vllm-ascend` patch version
+- `0.17.0rc1` remains supported as an explicit older version entry
+- future-version fallback for `vllm-ascend` should therefore land on `0.18.0rc1`, not `0.17.0rc1`
 
 The registry continues to resolve by explicit version string. No silent remapping from `0.18.0rc1` back to `0.17.0rc1`.
 
@@ -271,11 +275,11 @@ Required evidence:
 
 1. install or check path recognizes `0.18.0rc1`
 2. `python install.py --check --features ...` succeeds for the chosen feature set
-2. runtime patch activation logs appear for the enabled feature set
-3. `draft_model` path loads the drafter model or reaches the patched proposer path without version errors
-4. EARS path starts and handles `mtp`
-5. EARS path starts and handles `suffix`
-6. `WINGS_ENGINE_PATCH_OPTIONS` startup path is the one actually used for runtime validation
+3. runtime patch activation logs appear for the enabled feature set
+4. `draft_model` path loads the drafter model or reaches the patched proposer path without version errors
+5. EARS path starts and handles `mtp`
+6. EARS path starts and handles `suffix`
+7. `WINGS_ENGINE_PATCH_OPTIONS` startup path is the one actually used for runtime validation
 
 It is acceptable for the validation to be limited to startup and short inference probes if long benchmark runs are impractical in the container.
 
@@ -338,3 +342,4 @@ If validation uncovers a tightly coupled fix, that fix may be committed separate
 - keep README examples explicit about `0.18.0rc1`
 - document that `vllm-ascend` support is functional-first, not performance-guaranteed
 - preserve `0.17.0rc1` examples so existing users are not broken
+- write container-validation and EARS benchmark evidence to a versioned doc under `docs/`, so the implementation commit history and the validation artifact stay aligned
