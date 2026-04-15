@@ -69,7 +69,7 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
-| vllm | 0.19.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样（默认版本）|
+| vllm | 0.19.0 | ears | 为 NVIDIA 上的 `mtp` 和 `suffix` 投机解码启用 EARS 拒绝采样（默认版本）|
 | vllm-ascend | 0.18.0rc1 | ears | 为 Ascend 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样（默认版本）|
 | vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
 | vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
