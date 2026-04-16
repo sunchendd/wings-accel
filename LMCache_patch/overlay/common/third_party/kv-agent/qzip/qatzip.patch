@@ -1,0 +1,32 @@
+diff --git a/src/qatzip.c b/src/qatzip.c
+index 9e7c7f2..78e130f 100755
+--- a/src/qatzip.c
++++ b/src/qatzip.c
+@@ -587,6 +587,7 @@ int qzInit(QzSession_T *sess, unsigned char sw_backup)
+     unsigned int instance_found = 0;
+     static atomic_int waiting = 0;
+     static atomic_int wait_cnt = 0;
++    static atomic_int total_wait_cnt = 1;
+ #ifdef ADF_PCI_API
+     Cpa32U pcie_count = 0;
+ #endif
+@@ -624,7 +625,19 @@ int qzInit(QzSession_T *sess, unsigned char sw_backup)
+     init_timers();
+     g_process.sw_backup = sw_backup;
+ 
++    if (total_wait_cnt <= 0) {
++        if (1 == sw_backup) {
++            g_process.qz_init_status = QZ_NO_HW;
++            rc = QZ_OK;
++        } else if (0 == sw_backup) {
++            g_process.qz_init_status = QZ_NOSW_NO_HW;
++            rc = QZ_NOSW_NO_HW;
++        }
++        goto done;
++    }
++
+     if (waiting && wait_cnt > 0) {
++        total_wait_cnt --;
+         wait_cnt--;
+         BACKOUT(QZ_NOSW_NO_HW);
+     }

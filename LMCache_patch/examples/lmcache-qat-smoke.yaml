@@ -1,0 +1,21 @@
+chunk_size: 256
+local_cpu: true
+local_disk: /tmp/lmcache-qat-data
+max_local_disk_size: 30
+
+extra_config:
+  wings:
+    cold_start:
+      enabled: true
+      manifest_path: /tmp/lmcache-qat-data/.wings_cold_start_manifest.json
+      manifest_write_interval: 1
+    maintenance:
+      enabled: false
+    full_sync:
+      enabled: false
+    qat:
+      enabled: true
+      module_name: kv_agent
+      instance_num: 2
+      loss_level: 0
+      log_enabled: 1

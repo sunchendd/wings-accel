@@ -1,0 +1,1048 @@
+#!/usr/bin/env python3
+"""
+wings-accel Feature Installation CLI
+
+Implements the CLI contract defined in §3.3.6.2.1 of the wings-infer design document.
+
+Usage:
+    python install.py --list
+    python install.py --features '<JSON>'
+    python install.py --features '<JSON>' --dry-run
+    python install.py --check --features '<JSON>'
+    python install.py --lmcache-target nvidia-x86
+
+The --features JSON format:
+    {
+        "<engine_name>": {
+            "version": "<version_string>",
+            "features": ["<feature_name>", ...]
+        },
+        "lmcache": {
+            "target": "<target_name>"
+        }
+    }
+
+Example:
+    python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+    python install.py --features '{"lmcache": {"target": "nvidia-x86"}}'
+    python install.py --features
+        '{"vllm": {"version": "0.17.0", "features": ["ears"]}, "lmcache": {"target": "nvidia-x86"}}'
+
+Deployment layout (all files at the same level as install.py):
+    install.py
+    supported_features.json
+    wings_engine_patch-*.whl
+    wrapt-*-linux_x86_64.whl
+    wrapt-*-linux_aarch64.whl
+    arctic_inference-*.whl      (pre-built wheel, installed offline)
+    lmcache_manifest.json       (optional LMCache target manifest)
+    lmcache/<target>/*.whl      (optional LMCache wheels)
+    lmcache/<target>/deps/*.whl (optional offline LMCache dependency wheels)
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import logging
+import platform
+import subprocess
+import sys
+from pathlib import Path
+
+
+class _StreamProxy:
+    def __init__(self, stream_name: str):
+        self._stream_name = stream_name
+
+    def write(self, message: str) -> int:
+        return getattr(sys, self._stream_name).write(message)
+
+    def flush(self) -> None:
+        getattr(sys, self._stream_name).flush()
+
+
+def _build_logger(name: str, stream_name: str) -> logging.Logger:
+    configured_logger = logging.getLogger(name)
+    if configured_logger.handlers:
+        return configured_logger
+    handler = logging.StreamHandler(_StreamProxy(stream_name))
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    configured_logger.addHandler(handler)
+    configured_logger.setLevel(logging.INFO)
+    configured_logger.propagate = False
+    return configured_logger
+
+
+logger = _build_logger(__name__, "stdout")
+stderr_logger = _build_logger("stderr", "stderr")
+
+# Root-level supported_features.json is the CLI/MaaS-facing source of truth.
+_BASE_DIR = Path(__file__).resolve().parent
+_SUPPORTED_FEATURES_PATH = _BASE_DIR / "supported_features.json"
+_LMCACHE_MANIFEST_PATH = _BASE_DIR / "lmcache_manifest.json"
+# Deployment layout: all files (whl, source tarballs) sit next to install.py.
+# Source-tree fallback: build/output/ (used during local development).
+_LOCAL_WHEEL_DIR = _BASE_DIR if _BASE_DIR.name == "output" else _BASE_DIR / "build" / "output"
+
+# Map engine names to pyproject.toml [optional-dependencies] extras keys.
+_ENGINE_TO_EXTRAS = {
+    "vllm": "vllm",
+    "vllm-ascend": "vllm",
+    "vllm_ascend": "vllm",
+}
+
+_FEATURE_LOCAL_WHEELS: dict[str, tuple[str, Path | None]] = {}
+
+_ENGINE_ALIASES = {
+    "vllm": "vllm",
+    "vllm-ascend": "vllm-ascend",
+    "vllm_ascend": "vllm-ascend",
+}
+
+_LMCACHE_COMPONENT_NAME = "lmcache"
+
+
+def normalize_engine_name(engine_name: str) -> str:
+    return _ENGINE_ALIASES.get(engine_name, engine_name)
+
+
+# ---------------------------------------------------------------------------
+# supported_features.json helpers
+# ---------------------------------------------------------------------------
+
+def load_supported_features() -> dict:
+    if not _SUPPORTED_FEATURES_PATH.exists():
+        raise FileNotFoundError(f"supported_features.json not found at {_SUPPORTED_FEATURES_PATH}")
+    with open(_SUPPORTED_FEATURES_PATH, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def validate_schema(data: dict) -> None:
+    """Validate supported_features.json per §3.3.6.3.3.
+
+    Rules:
+    1. schema_version, updated_at, engines are required.
+    2. Each engine must have at least one version.
+    3. Each engine must have exactly one is_default:true version.
+    """
+    required_top = {"schema_version", "updated_at", "engines"}
+    missing = required_top - data.keys()
+    if missing:
+        raise ValueError(f"supported_features.json missing required top-level fields: {missing}")
+
+    for engine_name, engine_def in data["engines"].items():
+        versions = engine_def.get("versions", {})
+        if not versions:
+            raise ValueError(f"Engine '{engine_name}' has no versions defined.")
+
+        defaults = [v for v, spec in versions.items() if spec.get("is_default", False)]
+        if len(defaults) == 0:
+            raise ValueError(
+                f"Engine '{engine_name}' has no default version (is_default: true). "
+                "Exactly one version must be marked as default."
+            )
+        if len(defaults) > 1:
+            raise ValueError(
+                f"Engine '{engine_name}' has {len(defaults)} default versions: {defaults}. "
+                "Exactly one version must be marked as default."
+            )
+
+
+# ---------------------------------------------------------------------------
+# Version resolution
+# ---------------------------------------------------------------------------
+
+def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, dict]:
+    for ver, spec in versions.items():
+        if spec.get("is_default", False):
+            return ver, spec
+    raise ValueError(
+        f"Engine '{engine_name}' has no default version (is_default: true). "
+        "Exactly one version must be marked as default."
+    )
+
+
+def _get_packaging_version_types():
+    try:
+        from packaging.version import InvalidVersion, Version
+    except ImportError as exc:
+        raise RuntimeError(
+            "[wings-accel] packaging is required for version resolution. "
+            "Run `install.py --install-runtime-deps` first."
+        ) from exc
+    return Version, InvalidVersion
+
+
+def _parse_supported_versions(engine_name: str, versions: dict) -> list[tuple[object, str, dict]]:
+    version_cls, invalid_version_cls = _get_packaging_version_types()
+    parsed_versions: list[tuple[object, str, dict]] = []
+    for version_str, spec in versions.items():
+        try:
+            parsed_versions.append((version_cls(version_str), version_str, spec))
+        except invalid_version_cls as exc:
+            raise ValueError(
+                f"Engine '{engine_name}' declares unsupported version string '{version_str}' "
+                "that is not PEP 440 compatible."
+            ) from exc
+    parsed_versions.sort(key=lambda item: item[0])
+    return parsed_versions
+
+
+def _classify_requested_version(
+    engine_name: str,
+    requested_version: str,
+    versions: dict,
+) -> tuple[str, str, dict]:
+    version_cls, invalid_version_cls = _get_packaging_version_types()
+    if requested_version in versions:
+        return "exact", requested_version, versions[requested_version]
+
+    try:
+        requested = version_cls(requested_version)
+    except invalid_version_cls as exc:
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is not a valid PEP 440 version."
+        ) from exc
+
+    parsed_versions = _parse_supported_versions(engine_name, versions)
+    if not parsed_versions:
+        raise ValueError(f"Engine '{engine_name}' has no versions defined.")
+
+    min_supported, min_version_str, _ = parsed_versions[0]
+    max_supported, max_version_str, _ = parsed_versions[-1]
+
+    if (
+        not requested.is_prerelease
+        and max_supported.is_prerelease
+        and requested.release == max_supported.release
+    ):
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
+            f"Supported versions: {sorted(versions.keys())}."
+        )
+
+    if requested < min_supported:
+        raise ValueError(
+            f"Version '{requested_version}' for engine '{engine_name}' is older than the minimum "
+            f"supported patched version '{min_version_str}'. Historical versions are not supported."
+        )
+
+    if requested > max_supported:
+        default_version, default_spec = _get_default_version_spec(engine_name, versions)
+        return "future_fallback", default_version, default_spec
+
+    raise ValueError(
+        f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
+        f"Supported versions: {sorted(versions.keys())}."
+    )
+
+
+def resolve_version(engine_name: str, requested_version: str, engine_spec: dict):
+    """Resolve version with explicit old-version rejection and future fallback.
+
+    Returns (resolved_version_str, version_spec_dict).
+    """
+    versions = engine_spec.get("versions", {})
+    resolution_kind, resolved_version, version_spec = _classify_requested_version(
+        engine_name,
+        requested_version,
+        versions,
+    )
+
+    if resolution_kind == "future_fallback":
+        supported_versions = _parse_supported_versions(engine_name, versions)
+        highest_validated_version = supported_versions[-1][1]
+        stderr_logger.warning(
+            f"[wings-accel] Warning: version '{requested_version}' is newer than the highest "
+            f"validated version '{highest_validated_version}' for engine '{engine_name}'. "
+            f"Trying default version '{resolved_version}'."
+        )
+
+    return resolved_version, version_spec
+
+
+# ---------------------------------------------------------------------------
+# Feature validation
+# ---------------------------------------------------------------------------
+
+def validate_features(
+    engine_name: str,
+    version: str,
+    requested_features: list,
+    version_spec: dict,
+) -> None:
+    """Warn (not error) when a requested feature is not in the version spec."""
+    available = set(version_spec.get("features", {}).keys())
+    unknown = set(requested_features) - available
+    if unknown:
+        stderr_logger.warning(
+            f"[wings-accel] Warning: features {sorted(unknown)} are not listed in "
+            f"{engine_name}@{version}. Available: {sorted(available)}. "
+            "Proceeding with installation anyway."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Installation
+# ---------------------------------------------------------------------------
+
+def _find_local_whl() -> Path | None:
+    """Return the wings_engine_patch .whl in _BASE_DIR (deployment layout).
+
+    Falls back to build/output/ for local development (source-tree layout).
+    """
+    for search_dir in (_BASE_DIR, _LOCAL_WHEEL_DIR):
+        if search_dir.exists():
+            whls = [p for p in search_dir.glob("*.whl") if "wings_engine_patch" in p.name]
+            if whls:
+                return max(whls, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def _normalize_machine_arch(machine: str) -> str:
+    normalized = machine.lower()
+    if normalized in {"x86_64", "amd64"}:
+        return "x86_64"
+    if normalized in {"aarch64", "arm64"}:
+        return "aarch64"
+    return normalized
+
+
+def _find_local_wheel_by_prefix(prefix: str) -> Path | None:
+    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
+        if not search_dir.exists():
+            continue
+
+        matches = list(search_dir.glob(f"{prefix}-*.whl"))
+        if prefix == "wrapt" and matches:
+            current_arch = _normalize_machine_arch(platform.machine())
+            arch_matches = [wheel for wheel in matches if current_arch in wheel.name]
+            if arch_matches:
+                matches = arch_matches
+        if matches:
+            return max(matches, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def _find_lmcache_manifest() -> Path | None:
+    for candidate in (_LMCACHE_MANIFEST_PATH, _BASE_DIR / "build" / "output" / "lmcache_manifest.json"):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _load_lmcache_manifest() -> tuple[Path, dict]:
+    manifest_path = _find_lmcache_manifest()
+    if manifest_path is None:
+        raise FileNotFoundError(
+            "lmcache_manifest.json not found next to install.py or under build/output/."
+        )
+
+    with open(manifest_path, encoding="utf-8") as file_handle:
+        data = json.load(file_handle)
+
+    if not isinstance(data, dict) or not isinstance(data.get("targets"), dict):
+        raise ValueError(f"Invalid LMCache manifest format at {manifest_path}")
+
+    return manifest_path, data
+
+
+def _resolve_manifest_relative_path(manifest_path: Path, relative_path: str) -> Path:
+    wheel_path = (manifest_path.parent / relative_path).resolve()
+    if not wheel_path.is_file():
+        raise FileNotFoundError(
+            f"LMCache artifact '{relative_path}' referenced by {manifest_path.name} was not found."
+        )
+    return wheel_path
+
+
+def _install_wheel_batch(
+    wheel_paths: list[Path],
+    dry_run: bool = False,
+    *,
+    no_deps: bool,
+    description: str,
+    find_links_dirs: list[Path] | None = None,
+) -> None:
+    if not wheel_paths:
+        return
+
+    cmd = [sys.executable, "-m", "pip", "install", "--force-reinstall"]
+    if find_links_dirs:
+        cmd.append("--no-index")
+        for find_links_dir in find_links_dirs:
+            cmd.extend(["--find-links", str(find_links_dir)])
+    if no_deps:
+        cmd.append("--no-deps")
+    cmd.extend(str(wheel_path) for wheel_path in wheel_paths)
+
+    if dry_run:
+        logger.info("[dry-run] Would run: %s", " ".join(str(component) for component in cmd))
+        return
+
+    logger.info("[wings-accel] Installing %s ...", description)
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as exc:
+        stderr_logger.error(
+            "[wings-accel] Error: failed to install %s (exit %s).",
+            description,
+            exc.returncode,
+        )
+        raise
+
+
+def _collect_dependency_dirs(dependency_paths: list[Path]) -> list[Path]:
+    dependency_dirs: list[Path] = []
+    seen_directories: set[str] = set()
+
+    for wheel_path in dependency_paths:
+        directory = str(wheel_path.parent)
+        if directory in seen_directories:
+            continue
+        seen_directories.add(directory)
+        dependency_dirs.append(Path(directory))
+
+    dependency_dirs.sort(key=lambda path: str(path))
+    return dependency_dirs
+
+
+def install_lmcache_target(target: str, dry_run: bool = False) -> None:
+    manifest_path, manifest = _load_lmcache_manifest()
+    target_spec = manifest["targets"].get(target)
+    if target_spec is None:
+        available = sorted(manifest["targets"].keys())
+        raise ValueError(
+            f"LMCache target '{target}' not found in {manifest_path.name}. Available targets: {available}"
+        )
+
+    dependency_paths = [
+        _resolve_manifest_relative_path(manifest_path, rel_path)
+        for rel_path in target_spec.get("dependency_wheels", [])
+    ]
+    wheel_paths = [
+        _resolve_manifest_relative_path(manifest_path, rel_path)
+        for rel_path in target_spec.get("companion_wheels", [])
+    ]
+    wheel_paths.append(
+        _resolve_manifest_relative_path(manifest_path, target_spec["primary_wheel"])
+    )
+
+    logger.info(
+        "[wings-accel] Installing LMCache target '%s' (%s, %s) ...",
+        target,
+        target_spec.get("accelerator", "unknown"),
+        target_spec.get("architecture", "unknown"),
+    )
+
+    if dependency_paths:
+        dependency_dirs = _collect_dependency_dirs(dependency_paths)
+        _install_wheel_batch(
+            dependency_paths,
+            dry_run=dry_run,
+            no_deps=True,
+            description=f"LMCache dependency wheels for target '{target}'",
+            find_links_dirs=dependency_dirs,
+        )
+
+    for wheel_path in wheel_paths:
+        _install_wheel_batch(
+            [wheel_path],
+            dry_run=dry_run,
+            no_deps=True,
+            description=f"LMCache artifact '{wheel_path.name}'",
+        )
+
+    logger.info(
+        "[wings-accel] ✅ LMCache target '%s' installed from %s",
+        target,
+        manifest_path.name,
+    )
+
+
+def _validate_lmcache_request(config: object) -> str:
+    if not isinstance(config, dict):
+        raise ValueError(
+            "config for 'lmcache' must be a JSON object with required key 'target'."
+        )
+
+    known_lmcache_config_keys = {"target"}
+    unknown_keys = set(config.keys()) - known_lmcache_config_keys
+    if unknown_keys:
+        stderr_logger.warning(
+            f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
+            f"'{_LMCACHE_COMPONENT_NAME}'. Expected keys: {sorted(known_lmcache_config_keys)}."
+        )
+
+    target = config.get("target")
+    if not isinstance(target, str) or not target:
+        raise ValueError("'target' is required for 'lmcache' and must be a non-empty string.")
+
+    return target
+
+
+def _install_local_feature_wheels(features: list[str], dry_run: bool = False) -> None:
+    for feature_name in features:
+        package_name, wheel_path = _FEATURE_LOCAL_WHEELS.get(feature_name, (None, None))
+        if package_name is None:
+            continue
+        if wheel_path is None:
+            raise FileNotFoundError(
+                f"Feature '{feature_name}' requires local wheel '{package_name}-*.whl', "
+                f"but none was found in {_LOCAL_WHEEL_DIR}."
+            )
+
+        cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
+        if dry_run:
+            logger.info("[dry-run] Would run: %s", " ".join(str(c) for c in cmd))
+            continue
+
+        logger.info(
+            "[wings-accel] Installing feature dependency '%s' from %s ...",
+            package_name,
+            wheel_path.name,
+        )
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError as e:
+            stderr_logger.error(
+                "[wings-accel] Error: failed to install feature dependency '%s' (exit %s).",
+                package_name,
+                e.returncode,
+            )
+            raise
+
+
+def _find_arctic_inference_whl() -> Path | None:
+    for search_dir in (_LOCAL_WHEEL_DIR, _BASE_DIR):
+        if not search_dir.exists():
+            continue
+        for pattern in (
+            "arctic_inference-*.whl",
+            "arctic-inference-*.whl",
+        ):
+            matches = list(search_dir.glob(pattern))
+            if matches:
+                return max(matches, key=lambda p: p.stat().st_mtime)
+    return None
+
+
+def _is_arctic_inference_installed() -> bool:
+    return _is_module_available("arctic_inference")
+
+
+def _is_module_available(module_name: str) -> bool:
+    return importlib.util.find_spec(module_name) is not None
+
+
+def _has_local_runtime_deps() -> bool:
+    return _is_module_available("wrapt") and _is_module_available("packaging")
+
+
+def _install_local_dependency(
+    package_name: str,
+    module_name: str,
+    wheel_path: Path | None,
+    dry_run: bool = False,
+    *,
+    no_deps: bool = False,
+    missing_ok: bool = False,
+) -> None:
+    if _is_module_available(module_name):
+        logger.info(f"[wings-accel] {package_name} already installed, skipping.")
+        return
+
+    if wheel_path is None:
+        message = (
+            f"[wings-accel] {package_name} wheel not found in {_LOCAL_WHEEL_DIR} or {_BASE_DIR}, "
+            "skipping."
+        )
+        if dry_run:
+            logger.info(f"[dry-run] {message}")
+            return
+        if missing_ok:
+            logger.info(message)
+            return
+        raise FileNotFoundError(message)
+
+    cmd = [sys.executable, "-m", "pip", "install", str(wheel_path)]
+    if no_deps:
+        cmd.append("--no-deps")
+
+    if dry_run:
+        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
+        return
+
+    logger.info(f"[wings-accel] Installing {package_name} from {wheel_path.name} ...")
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as exc:
+        stderr_logger.error(
+            f"[wings-accel] Error: failed to install {package_name} (exit {exc.returncode})."
+        )
+        raise
+
+
+def install_runtime_dependencies(dry_run: bool = False) -> None:
+    runtime_dependencies = (
+        ("wrapt", "wrapt", _find_local_wheel_by_prefix("wrapt"), False),
+        ("packaging", "packaging", _find_local_wheel_by_prefix("packaging"), False),
+    )
+
+    for package_name, module_name, wheel_path, missing_ok in runtime_dependencies:
+        _install_local_dependency(
+            package_name,
+            module_name,
+            wheel_path,
+            dry_run=dry_run,
+            missing_ok=missing_ok,
+        )
+
+    _install_arctic_inference(dry_run=dry_run)
+
+
+def _install_arctic_inference(dry_run: bool = False) -> None:
+    """Install arctic-inference from the local pre-built wheel (offline, no compilation).
+
+    Skipped when:
+      - arctic-inference is already installed (e.g. vllm-ascend containers ship it), or
+      - the host architecture is not x86_64 (the pre-built wheel only targets x86_64).
+    """
+    arch = platform.machine()
+    if arch != "x86_64":
+        logger.info(
+            f"[wings-accel] Skipping arctic-inference install: architecture is {arch} (x86_64 only)."
+        )
+        return
+
+    _install_local_dependency(
+        "arctic-inference",
+        "arctic_inference",
+        _find_arctic_inference_whl(),
+        dry_run=dry_run,
+        no_deps=True,
+        missing_ok=True,
+    )
+
+
+def install_engine(
+    engine_name: str,
+    version: str,
+    features: list,
+    dry_run: bool = False,
+    display_engine_name: str | None = None,
+) -> None:
+    """Run pip install for the given engine's extras group.
+
+    Supports fully offline installation:
+      - When a local .whl is found, uses --find-links + --no-index so pip
+        resolves ALL dependencies (e.g. wrapt) from the same local directory.
+      - Falls back to --no-deps when all runtime deps are already importable.
+      - Falls back to PyPI when no local wheel is available.
+    """
+    _install_local_feature_wheels(features, dry_run=dry_run)
+
+    canonical_engine_name = normalize_engine_name(engine_name)
+    extras = _ENGINE_TO_EXTRAS.get(canonical_engine_name, canonical_engine_name)
+    display_engine_name = display_engine_name or engine_name
+    local_whl = _find_local_wheel_by_prefix("wings_engine_patch") or _find_local_whl()
+
+    if local_whl:
+        pkg = f"{local_whl}[{extras}]"
+        local_dir = str(local_whl.parent)
+        if _has_local_runtime_deps():
+            cmd = [sys.executable, "-m", "pip", "install", pkg, "--no-deps"]
+        else:
+            cmd = [sys.executable, "-m", "pip", "install", pkg, "--no-index", "--find-links", local_dir]
+    else:
+        pkg = f"wings_engine_patch[{extras}]"
+        cmd = [sys.executable, "-m", "pip", "install", pkg]
+
+    if dry_run:
+        logger.info(f"[dry-run] Would run: {' '.join(str(c) for c in cmd)}")
+        _print_env_hint(display_engine_name, version, features, dry_run=True)
+        return
+
+    logger.info(f"[wings-accel] Installing for engine '{display_engine_name}' (extras: [{extras}]) ...")
+    try:
+        subprocess.check_call(cmd)
+    except subprocess.CalledProcessError as e:
+        if local_whl and "--no-index" in cmd:
+            stderr_logger.warning(
+                "[wings-accel] Offline install failed (missing dependency wheels?), "
+                "retrying with --no-deps ..."
+            )
+            cmd_fallback = [sys.executable, "-m", "pip", "install", pkg, "--no-deps"]
+            try:
+                subprocess.check_call(cmd_fallback)
+            except subprocess.CalledProcessError as e2:
+                stderr_logger.error(
+                    f"[wings-accel] Error: pip install failed (exit {e2.returncode})."
+                )
+                raise
+        else:
+            stderr_logger.error(f"[wings-accel] Error: pip install failed (exit {e.returncode}).")
+            raise
+
+    _print_env_hint(display_engine_name, version, features)
+
+
+def _print_env_hint(engine_name: str, version: str, features: list, dry_run: bool = False) -> None:
+    patch_options = {engine_name: {"version": version, "features": features}}
+    prefix = "[dry-run] " if dry_run else ""
+    logger.info(
+        f"\n{prefix}[wings-accel] ✅ Done. To enable patches at runtime, set:\n"
+        f"  export WINGS_ENGINE_PATCH_OPTIONS='{json.dumps(patch_options)}'"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Developer self-validation (--check)
+# ---------------------------------------------------------------------------
+
+def check_installed(
+    engine_name: str,
+    version: str,
+    features: list
+) -> bool:
+    """Verify that wings_engine_patch is installed and the requested engine/features
+    are registered in the patch registry.
+
+    Returns:
+        bool: True if all checks pass, False otherwise
+    """
+    logger.info(f"[wings-accel] Checking {engine_name}@{version} features: {features}")
+    canonical_engine_name = normalize_engine_name(engine_name)
+
+    # 1. package installed?
+    try:
+        import wings_engine_patch  # noqa: F401
+        import wings_engine_patch.registry_v1 as reg_v1
+
+        logger.info("  ✅ wings_engine_patch installed")
+    except ImportError as e:
+        stderr_logger.error(f"  ❌ wings_engine_patch not installed: {e}")
+        return False
+
+    # 2. engine registered?
+    registry = getattr(reg_v1, "_registered_patches", {})
+    if canonical_engine_name not in registry:
+        stderr_logger.error(f"  ❌ Engine '{engine_name}' not found in patch registry.")
+        return False
+    logger.info(f"  ✅ Engine '{engine_name}' registered in patch registry")
+
+    # 3. version policy
+    engine_versions = registry[canonical_engine_name]
+    try:
+        resolution_kind, resolved_version, ver_spec = _classify_requested_version(
+            canonical_engine_name,
+            version,
+            engine_versions,
+        )
+    except ValueError as exc:
+        stderr_logger.error(f"  ❌ {exc}")
+        return False
+
+    if resolution_kind == "exact":
+        logger.info(f"  ✅ Version '{version}' found")
+    else:
+        supported_versions = _parse_supported_versions(engine_name, engine_versions)
+        highest_validated_version = supported_versions[-1][1]
+        logger.warning(
+            f"  ⚠️  Version '{version}' is newer than highest validated version "
+            f"'{highest_validated_version}'; trying default '{resolved_version}'"
+        )
+
+    # 4. features declared / builder present?
+    has_spec = "builder" in ver_spec or "features" in ver_spec
+    if not has_spec:
+        stderr_logger.error(
+            f"  ❌ No patch spec (builder or features) for {engine_name}@{resolved_version}."
+        )
+        return False
+    logger.info("  ✅ Patch spec available (lazy builder or pre-loaded features)")
+
+    # 5. individual features
+    declared_features = set()
+    if "features" in ver_spec:
+        declared_features = set(ver_spec["features"].keys())
+    elif "builder" in ver_spec:
+        # builder is lazy; we trust declaration in supported_features.json
+        logger.info("  ℹ️  Patch uses lazy builder; feature declarations taken from supported_features.json")
+
+    for feat in features:
+        if not declared_features or feat in declared_features:
+            logger.info(f"  ✅ Feature '{feat}' declared")
+        else:
+            logger.warning(f"  ⚠️  Feature '{feat}' not in loaded spec (may be loaded lazily)")
+
+    return True
+
+
+# ---------------------------------------------------------------------------
+# List features
+# ---------------------------------------------------------------------------
+
+def list_features(data: dict) -> None:
+    logger.info(
+        f"wings-accel supported features "
+        f"(schema v{data['schema_version']}, updated {data['updated_at']})"
+    )
+    desc = data.get("description", "")
+    if desc:
+        logger.info(f"{desc}\n")
+
+    for engine_name, engine_def in data["engines"].items():
+        logger.info(f"  Engine: {engine_name}")
+        edesc = engine_def.get("description", "")
+        if edesc:
+            logger.info(f"    {edesc}")
+        for ver, ver_spec in engine_def.get("versions", {}).items():
+            default_marker = "  [default]" if ver_spec.get("is_default") else ""
+            logger.info(f"    Version: {ver}{default_marker}")
+            features = ver_spec.get("features", {})
+            if features:
+                for feat, feat_def in features.items():
+                    fdesc = feat_def.get("description", "")
+                    logger.info(f"      - {feat}: {fdesc}")
+            else:
+                logger.info("      (no features declared)")
+    logger.info("")
+
+    manifest_path = _find_lmcache_manifest()
+    if manifest_path is None:
+        return
+
+    try:
+        _, manifest = _load_lmcache_manifest()
+    except (FileNotFoundError, ValueError):
+        return
+
+    targets = manifest.get("targets", {})
+    if not targets:
+        return
+
+    logger.info("LMCache targets:")
+    for target_name, target_spec in sorted(targets.items()):
+        logger.info(
+            "  - %s: accelerator=%s arch=%s wheel=%s",
+            target_name,
+            target_spec.get("accelerator", "unknown"),
+            target_spec.get("architecture", "unknown"),
+            target_spec.get("primary_wheel", "<missing>"),
+        )
+    logger.info("")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="install.py",
+        description="wings-accel feature installation CLI",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python install.py --list
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+  python install.py --features '{"lmcache": {"target": "nvidia-x86"}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}, "lmcache": {"target": "nvidia-x86"}}'
+  python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}' --dry-run
+  python install.py --check --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+""",
+    )
+    parser.add_argument(
+        "--features",
+        type=str,
+        metavar="JSON",
+        help=(
+            'JSON string: {"<engine>": {"version": "<ver>", "features": [...]}, '
+            '"lmcache": {"target": "<target>"}}'
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate inputs and print commands without executing pip install",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify that installed patches are registered and callable (developer self-validation)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List all supported engines, versions, and features",
+    )
+    parser.add_argument(
+        "--install-runtime-deps",
+        action="store_true",
+        help="Install fixed runtime dependencies only (wrapt, packaging, arctic-inference)",
+    )
+    parser.add_argument(
+        "--lmcache-target",
+        type=str,
+        metavar="TARGET",
+        help=(
+            "Compatibility shortcut for LMCache installation. Prefer "
+            "--features '{\"lmcache\": {\"target\": \"<target>\"}}'."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.lmcache_target and args.features:
+        stderr_logger.error("[wings-accel] Error: --lmcache-target cannot be used together with --features.")
+        sys.exit(1)
+
+    if args.lmcache_target and args.check:
+        stderr_logger.error("[wings-accel] Error: --check is only supported with --features, not --lmcache-target.")
+        sys.exit(1)
+
+    if args.lmcache_target:
+        stderr_logger.warning(
+            "[wings-accel] Warning: --lmcache-target is kept for compatibility. Prefer "
+            "--features '{\"lmcache\": {\"target\": \"<target>\"}}'."
+        )
+        try:
+            install_lmcache_target(args.lmcache_target, dry_run=args.dry_run)
+        except (FileNotFoundError, ValueError) as exc:
+            stderr_logger.error(f"[wings-accel] Error: {exc}")
+            sys.exit(1)
+        return
+
+    # --list
+    if args.list:
+        try:
+            data = load_supported_features()
+            validate_schema(data)
+        except (FileNotFoundError, ValueError) as e:
+            stderr_logger.error(f"[wings-accel] Error: {e}")
+            sys.exit(1)
+        list_features(data)
+        return
+
+    if args.install_runtime_deps:
+        install_runtime_dependencies(dry_run=args.dry_run)
+        return
+
+    # --features is required for all other modes
+    if not args.features:
+        parser.print_help()
+        sys.exit(0)
+
+    # Parse --features JSON
+    try:
+        features_config = json.loads(args.features)
+    except json.JSONDecodeError as e:
+        stderr_logger.error(f"[wings-accel] Error: --features is not valid JSON: {e}")
+        sys.exit(1)
+
+    if not isinstance(features_config, dict):
+        stderr_logger.error("[wings-accel] Error: --features must be a JSON object.")
+        sys.exit(1)
+
+    has_lmcache_request = _LMCACHE_COMPONENT_NAME in features_config
+    has_engine_requests = any(name != _LMCACHE_COMPONENT_NAME for name in features_config)
+
+    if args.check and has_lmcache_request:
+        stderr_logger.error(
+            "[wings-accel] Error: --check does not support the standalone 'lmcache' installer entry."
+        )
+        sys.exit(1)
+
+    engines_spec: dict[str, dict] = {}
+    if has_engine_requests:
+        try:
+            data = load_supported_features()
+            validate_schema(data)
+        except (FileNotFoundError, ValueError) as e:
+            stderr_logger.error(f"[wings-accel] Error: {e}")
+            sys.exit(1)
+        engines_spec = data["engines"]
+
+    exit_code = 0
+
+    if has_engine_requests and not args.check:
+        install_runtime_dependencies(dry_run=args.dry_run)
+
+    for component_name, config in features_config.items():
+        if component_name == _LMCACHE_COMPONENT_NAME:
+            try:
+                target = _validate_lmcache_request(config)
+                install_lmcache_target(target, dry_run=args.dry_run)
+            except (FileNotFoundError, ValueError) as exc:
+                stderr_logger.error(f"[wings-accel] Error: {exc}")
+                sys.exit(1)
+            continue
+
+        engine_name = component_name
+        requested_engine_name = engine_name
+        canonical_engine_name = normalize_engine_name(engine_name)
+        if not isinstance(config, dict):
+            stderr_logger.error(
+                f"[wings-accel] Error: config for '{engine_name}' must be a JSON object "
+                "with 'version' and optional 'features' keys."
+            )
+            sys.exit(1)
+
+        if canonical_engine_name not in engines_spec:
+            stderr_logger.error(
+                f"[wings-accel] Error: engine '{requested_engine_name}' is not listed in supported_features.json. "
+                f"Available engines: {list(engines_spec.keys())}"
+            )
+            sys.exit(1)
+
+        requested_version = config.get("version")
+        requested_features = config.get("features", [])
+
+        known_engine_config_keys = {"version", "features"}
+        unknown_keys = set(config.keys()) - known_engine_config_keys
+        if unknown_keys:
+            stderr_logger.warning(
+                f"[wings-accel] Warning: unknown keys {sorted(unknown_keys)} in config for "
+                f"'{engine_name}'. Expected keys: {sorted(known_engine_config_keys)}."
+            )
+
+        if not requested_version:
+            stderr_logger.error(f"[wings-accel] Error: 'version' is required for engine '{engine_name}'.")
+            sys.exit(1)
+
+        if not isinstance(requested_features, list):
+            stderr_logger.error(f"[wings-accel] Error: 'features' for engine '{engine_name}' must be a list.")
+            sys.exit(1)
+
+        # Resolve version with fallback
+        try:
+            resolved_version, version_spec = resolve_version(
+                canonical_engine_name, requested_version, engines_spec[canonical_engine_name]
+            )
+        except ValueError as e:
+            stderr_logger.error(f"[wings-accel] Error: {e}")
+            sys.exit(1)
+
+        # Validate features (warn only, don't abort)
+        validate_features(canonical_engine_name, resolved_version, requested_features, version_spec)
+
+        if args.check:
+            ok = check_installed(requested_engine_name, resolved_version, requested_features)
+            if not ok:
+                exit_code = 1
+        else:
+            install_engine(
+                canonical_engine_name,
+                resolved_version,
+                requested_features,
+                dry_run=args.dry_run,
+                display_engine_name=requested_engine_name,
+            )
+
+    sys.exit(exit_code)
+
+
+if __name__ == "__main__":
+    main()

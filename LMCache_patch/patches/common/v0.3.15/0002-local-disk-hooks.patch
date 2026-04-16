@@ -1,0 +1,154 @@
+--- a/lmcache/v1/storage_backend/local_disk_backend.py
++++ b/lmcache/v1/storage_backend/local_disk_backend.py
+@@ -25,6 +25,19 @@
+     AsyncPQThreadPoolExecutor,
+ )
+ from lmcache.v1.storage_backend.local_cpu_backend import LocalCPUBackend
++from lmcache.v1.wings_ext.cold_start import (
++    initialize_manifest_state,
++    note_manifest_remove,
++    note_manifest_write,
++    save_manifest,
++)
++from lmcache.v1.wings_ext.qat import (
++    configure_local_disk_backend_for_qat,
++    estimate_qat_physical_size,
++    load_memory_obj_with_qat,
++    record_qat_persisted_file,
++    save_memory_obj_with_qat,
++)
+ 
+ if TYPE_CHECKING:
+     # First Party
+@@ -114,6 +127,8 @@
+ 
+         self.dst_device = dst_device
+ 
++        self.engine_config = config
++        self.metadata = metadata
+         self.local_cpu_backend = local_cpu_backend
+ 
+         self.disk_lock = threading.Lock()
+@@ -168,6 +183,9 @@
+         else:
+             logger.warning("Controller message sender is not initialized")
+ 
++        self.wings_cold_start_summary = initialize_manifest_state(self)
++        self.wings_qat_probe = configure_local_disk_backend_for_qat(self)
++
+     def __str__(self):
+         return "LocalDiskBackend"
+ 
+@@ -245,6 +263,7 @@
+         # res.result()
+ 
+         os.remove(path)
++        note_manifest_remove(self, key)
+ 
+         if force:
+             self.cache_policy.update_on_force_evict(key)
+@@ -313,7 +332,8 @@
+         self.disk_worker.insert_put_task(key)
+ 
+         # TODO(Jiayi): Fragmentation is not considered here.
+-        required_size = memory_obj.get_physical_size()
++        raw_required_size = memory_obj.get_physical_size()
++        required_size = estimate_qat_physical_size(self, raw_required_size)
+         all_evict_keys = []
+         evict_success = True
+         with self.disk_lock:
+@@ -350,6 +370,7 @@
+                 key=key,
+                 memory_obj=memory_obj,
+                 on_complete_callback=on_complete_callback,
++                reserved_size=required_size,
+             ),
+             self.loop,
+         )
+@@ -483,6 +504,7 @@
+         key: CacheEngineKey,
+         memory_obj: MemoryObj,
+         on_complete_callback: Optional[Callable[[CacheEngineKey], None]] = None,
++        reserved_size: Optional[int] = None,
+     ) -> None:
+         """
+         Convert KV to bytes and async store bytes to disk.
+@@ -496,12 +518,25 @@
+         buffer = memory_obj.byte_array
+         path = self._key_to_path(key)
+ 
+-        size = len(buffer)
+-        self.usage += size
+-        self.stats_monitor.update_local_storage_usage(self.usage)
++        raw_size = len(buffer)
++        actual_size = raw_size
+ 
+         # TODO(Jiayi): need to add ref count in disk memory object
+-        self.write_file(buffer, path)
++        if save_memory_obj_with_qat(self, memory_obj, path):
++            actual_size = record_qat_persisted_file(
++                self,
++                path,
++                raw_size,
++                reserved_size=reserved_size,
++            )
++        else:
++            self.write_file(buffer, path)
++            if reserved_size is not None and reserved_size != raw_size:
++                with self.disk_lock:
++                    self.current_cache_size += raw_size - reserved_size
++
++        self.usage += actual_size
++        self.stats_monitor.update_local_storage_usage(self.usage)
+ 
+         # ref count down here because there's a ref_count_up in
+         # `submit_put_task` above.
+@@ -509,7 +544,7 @@
+         # purposes (e.g., testing mem_leak).
+         # TODO(Jiayi): This could be problematic if the
+         # freed memory object is immediately reused.
+-        size = memory_obj.get_physical_size()
++        size = actual_size
+         shape = memory_obj.metadata.shape
+         dtype = memory_obj.metadata.dtype
+         fmt = memory_obj.metadata.fmt
+@@ -517,6 +552,7 @@
+         memory_obj.ref_count_down()
+ 
+         self.insert_key(key, size, shape, dtype, fmt, cached_positions=cached_positions)
++        note_manifest_write(self, key)
+ 
+         self.disk_worker.remove_put_task(key)
+ 
+@@ -541,8 +577,9 @@
+         logger.debug("Executing `async_load_bytes` from disk.")
+         # TODO (Jiayi): handle the case where loading fails.
+         for path, key, mem_obj in zip(paths, keys, memory_objs, strict=False):
+-            buffer = mem_obj.byte_array
+-            self.read_file(key, buffer, path)
++            if not load_memory_obj_with_qat(self, mem_obj, path):
++                buffer = mem_obj.byte_array
++                self.read_file(key, buffer, path)
+ 
+             # TODO(Jiayi): Please recover the metadata in a more
+             # elegant way in the future.
+@@ -570,8 +607,9 @@
+         memory_obj = self.local_cpu_backend.allocate(shape, dtype, fmt)
+         assert memory_obj is not None, "Memory allocation failed during disk load."
+ 
+-        buffer = memory_obj.byte_array
+-        self.read_file(key, buffer, path)
++        if not load_memory_obj_with_qat(self, memory_obj, path):
++            buffer = memory_obj.byte_array
++            self.read_file(key, buffer, path)
+ 
+         # TODO(Jiayi): Please recover the metadata in a more
+         # elegant way in the future.
+@@ -630,6 +668,7 @@
+         return self.local_cpu_backend
+ 
+     def close(self) -> None:
++        save_manifest(self, force=True)
+         if self.batched_msg_sender is not None:
+             self.batched_msg_sender.close()
+         self.disk_worker.close()

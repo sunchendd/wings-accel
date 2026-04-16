@@ -1,0 +1,311 @@
+diff --git a/lmcache/integration/vllm/utils.py b/lmcache/integration/vllm/utils.py
+index 11da322..555db9a 100644
+--- a/lmcache/integration/vllm/utils.py
++++ b/lmcache/integration/vllm/utils.py
+@@ -18,6 +18,7 @@ import torch
+ from lmcache.logging import init_logger
+ from lmcache.v1.config import LMCacheEngineConfig
+ from lmcache.v1.config_base import apply_remote_configs, fetch_remote_config
++from lmcache.v1.wings_ext.ascend.runtime import get_runtime_torch_device
+ 
+ logger = init_logger(__name__)
+ ENGINE_NAME = "vllm-instance"
+@@ -294,20 +295,17 @@ def get_vllm_torch_dev():
+     """
+     Returns the torch device and device name for the vLLM engine.
+     e.g. (torch.cuda, "cuda") or (torch.xpu, "xpu")
++    On vLLM-Ascend, this can also return (torch.npu, "npu").
+     """
+     # Third Party
+     from vllm.platforms import current_platform
+ 
+-    if current_platform.is_cuda_alike():
+-        logger.info("CUDA device is available. Using CUDA for LMCache engine.")
+-        torch_dev = torch.cuda
+-        dev_name = "cuda"
+-    elif current_platform.is_xpu():
+-        logger.info("XPU device is available. Using XPU for LMCache engine.")
+-        torch_dev = torch.xpu
+-        dev_name = "xpu"
+-    else:
+-        raise RuntimeError("Unsupported device platform for LMCache engine.")
++    torch_dev, dev_name = get_runtime_torch_device(current_platform)
++    logger.info(
++        "%s device is available. Using %s for LMCache engine.",
++        dev_name.upper(),
++        dev_name.upper(),
++    )
+     return torch_dev, dev_name
+ 
+ 
+diff --git a/lmcache/v1/gpu_connector/__init__.py b/lmcache/v1/gpu_connector/__init__.py
+index b120c15..e845eeb 100644
+--- a/lmcache/v1/gpu_connector/__init__.py
++++ b/lmcache/v1/gpu_connector/__init__.py
+@@ -69,6 +69,11 @@ def CreateGPUConnector(
+         local_worker_id = metadata.local_worker_id
+         torch_dev, dev_name = get_vllm_torch_dev()
+         torch_dev.set_device(local_worker_id)
++
++        if dev_name == "npu" and config.use_layerwise:
++            raise RuntimeError(
++                "Ascend connector currently supports only non-layerwise mode."
++            )
+         device = torch.device(f"{dev_name}:{local_worker_id}")
+ 
+         if config.use_layerwise:
+@@ -97,6 +102,15 @@ def CreateGPUConnector(
+             )
+ 
+             return VLLMPagedMemXPUConnectorV2.from_metadata(metadata, use_gpu, device)
++        elif dev_name == "npu":
++            # First Party
++            from lmcache.v1.gpu_connector.npu_connectors import (
++                VLLMPagedMemNPUConnectorV2,
++            )
++
++            return VLLMPagedMemNPUConnectorV2.from_metadata(
++                metadata, use_gpu, device
++            )
+         else:
+             raise RuntimeError("No supported connector found for the current platform.")
+ 
+diff --git a/lmcache/v1/storage_backend/__init__.py b/lmcache/v1/storage_backend/__init__.py
+index b7212b9..858e615 100644
+--- a/lmcache/v1/storage_backend/__init__.py
++++ b/lmcache/v1/storage_backend/__init__.py
+@@ -18,6 +18,10 @@ from lmcache.v1.storage_backend.local_cpu_backend import LocalCPUBackend
+ from lmcache.v1.storage_backend.local_disk_backend import LocalDiskBackend
+ from lmcache.v1.storage_backend.p2p_backend import P2PBackend
+ from lmcache.v1.storage_backend.remote_backend import RemoteBackend
++from lmcache.v1.wings_ext.ascend.runtime import (
++    detect_runtime_accelerator,
++    resolve_backend_dst_device,
++)
+ 
+ if TYPE_CHECKING:
+     # First Party
+@@ -28,15 +32,19 @@ logger = init_logger(__name__)
+ 
+ def is_cuda_worker(metadata: LMCacheMetadata) -> bool:
+     """
+-    Check if the current role is worker and CUDA is available.
++    Check if the current role is worker and an accelerator is available.
+ 
+     Args:
+         metadata: The LMCache engine metadata.
+ 
+     Returns:
+-        True if the worker is not a scheduler and CUDA is available.
++        True if the worker is not a scheduler and an accelerator is available.
+     """
+-    return metadata.role != "scheduler" and torch.cuda.is_available()
++    return metadata.role != "scheduler" and detect_runtime_accelerator() in {
++        "cuda",
++        "xpu",
++        "npu",
++    }
+ 
+ 
+ def storage_plugin_launcher(
+@@ -119,12 +127,7 @@ def CreateStorageBackends(
+     skip_backends: Optional[AbstractSet[str]] = None,
+     existing_backends: Optional[OrderedDict[str, StorageBackendInterface]] = None,
+ ) -> OrderedDict[str, StorageBackendInterface]:
+-    if is_cuda_worker(metadata):
+-        dst_device = f"cuda:{torch.cuda.current_device()}"
+-    elif dst_device == "xpu":
+-        dst_device = f"xpu:{torch.xpu.current_device()}"
+-    else:
+-        dst_device = "cpu"
++    dst_device = resolve_backend_dst_device(metadata, dst_device)
+     storage_backends: OrderedDict[str, StorageBackendInterface] = OrderedDict()
+     _skip = skip_backends or set()
+ 
+diff --git a/lmcache/v1/storage_backend/local_cpu_backend.py b/lmcache/v1/storage_backend/local_cpu_backend.py
+index aeb2a0b..e09f62f 100644
+--- a/lmcache/v1/storage_backend/local_cpu_backend.py
++++ b/lmcache/v1/storage_backend/local_cpu_backend.py
+@@ -26,6 +26,7 @@ from lmcache.v1.metadata import LMCacheMetadata
+ from lmcache.v1.storage_backend.abstract_backend import AllocatorBackendInterface
+ from lmcache.v1.storage_backend.batched_message_sender import BatchedMessageSender
+ from lmcache.v1.storage_backend.cache_policy import get_cache_policy
++from lmcache.v1.wings_ext.ascend.runtime import is_storage_accelerator_available
+ from lmcache.v1.system_detection import NUMADetector, SystemMemoryDetector
+ 
+ if TYPE_CHECKING:
+@@ -50,7 +51,7 @@ class LocalCPUBackend(AllocatorBackendInterface):
+         lmcache_worker: Optional["LMCacheWorker"] = None,
+         memory_allocator: Optional[MemoryAllocatorInterface] = None,
+     ):
+-        if torch.cuda.is_available():
++        if is_storage_accelerator_available(dst_device):
+             super().__init__(dst_device)
+         else:
+             super().__init__("cpu")
+diff --git a/lmcache/v1/storage_backend/local_disk_backend.py b/lmcache/v1/storage_backend/local_disk_backend.py
+index 923b25e..894feb3 100644
+--- a/lmcache/v1/storage_backend/local_disk_backend.py
++++ b/lmcache/v1/storage_backend/local_disk_backend.py
+@@ -21,6 +21,7 @@ from lmcache.v1.metadata import LMCacheMetadata
+ from lmcache.v1.storage_backend.abstract_backend import StorageBackendInterface
+ from lmcache.v1.storage_backend.batched_message_sender import BatchedMessageSender
+ from lmcache.v1.storage_backend.cache_policy import get_cache_policy
++from lmcache.v1.wings_ext.ascend.runtime import is_storage_accelerator_available
+ from lmcache.v1.storage_backend.job_executor.pq_executor import (
+     AsyncPQThreadPoolExecutor,
+ )
+@@ -115,7 +116,7 @@ class LocalDiskBackend(StorageBackendInterface):
+         lmcache_worker: Optional["LMCacheWorker"] = None,
+         metadata: Optional[LMCacheMetadata] = None,
+     ):
+-        if torch.cuda.is_available():
++        if is_storage_accelerator_available(dst_device):
+             super().__init__(dst_device)
+         else:
+             super().__init__("cpu")
+diff --git a/lmcache/v1/storage_backend/storage_manager.py b/lmcache/v1/storage_backend/storage_manager.py
+index 884e884..ea25f5e 100644
+--- a/lmcache/v1/storage_backend/storage_manager.py
++++ b/lmcache/v1/storage_backend/storage_manager.py
+@@ -43,6 +43,10 @@ from lmcache.v1.storage_backend.abstract_backend import (
+     StorageBackendInterface,
+ )
+ from lmcache.v1.storage_backend.local_cpu_backend import LocalCPUBackend
++from lmcache.v1.wings_ext.ascend.runtime import (
++    create_runtime_stream,
++    resolve_backend_dst_device,
++)
+ 
+ if TYPE_CHECKING:
+     # First Party
+@@ -267,7 +271,7 @@ class StorageManager:
+ 
+         # The cuda stream for internal copies during put
+         if is_cuda_worker(metadata):
+-            self.internal_copy_stream = torch.cuda.Stream()
++            self.internal_copy_stream = create_runtime_stream()
+         else:
+             self.internal_copy_stream = None
+ 
+@@ -1219,7 +1223,7 @@ class StorageManager:
+                 self.config,
+                 self.metadata,
+                 self.loop,
+-                dst_device=("cuda" if is_cuda_worker(self.metadata) else "cpu"),
++                dst_device=resolve_backend_dst_device(self.metadata, "cuda"),
+                 lmcache_worker=self.lmcache_worker,
+                 skip_backends=existing_names,
+                 existing_backends=self.storage_backends,
+@@ -1281,7 +1285,7 @@ class StorageManager:
+                 self.config,
+                 self.metadata,
+                 self.loop,
+-                dst_device=("cuda" if is_cuda_worker(self.metadata) else "cpu"),
++                dst_device=resolve_backend_dst_device(self.metadata, "cuda"),
+                 lmcache_worker=self.lmcache_worker,
+                 skip_backends=existing_names,
+                 existing_backends=self.storage_backends,
+diff --git a/lmcache/v1/system_detection.py b/lmcache/v1/system_detection.py
+index 8b542bd..566c433 100644
+--- a/lmcache/v1/system_detection.py
++++ b/lmcache/v1/system_detection.py
+@@ -8,17 +8,20 @@ import platform
+ import psutil
+ import torch
+ 
+-if torch.cuda.is_available():
+-    try:
+-        # First Party
+-        from lmcache.c_ops import get_gpu_pci_bus_id
+-    except ImportError:
+-        # Fallback if c_ops is not available
+-        get_gpu_pci_bus_id = None
++try:
++    # First Party
++    from lmcache.c_ops import get_gpu_pci_bus_id
++except ImportError:
++    get_gpu_pci_bus_id = None
+ 
+ # First Party
+ from lmcache.logging import init_logger
+ from lmcache.v1.config import LMCacheEngineConfig
++from lmcache.v1.wings_ext.ascend.runtime import (
++    detect_runtime_accelerator,
++    get_manual_numa_mapping,
++    resolve_physical_device_id,
++)
+ 
+ logger = init_logger(__name__)
+ 
+@@ -82,13 +85,14 @@ class NUMADetector:
+             "Please ensure the configuration is properly set."
+         )
+ 
+-        assert "gpu_to_numa_mapping" in config.extra_config, (
+-            "NUMA mode is set to `manual` but gpu_to_numa_mapping is None. "
+-            "Please ensure the configuration is properly set."
++        gpu_to_numa_mapping = get_manual_numa_mapping(config.extra_config)
++        assert gpu_to_numa_mapping is not None, (
++            "NUMA mode is set to `manual` but no device-to-numa mapping is configured. "
++            "Expected one of extra_config.gpu_to_numa_mapping, "
++            "extra_config.npu_to_numa_mapping, or "
++            "extra_config.wings.ascend.device_to_numa_mapping."
+         )
+ 
+-        gpu_to_numa_mapping = config.extra_config.get("gpu_to_numa_mapping")
+-
+         return NUMAMapping(gpu_to_numa_mapping)
+ 
+     @staticmethod
+@@ -98,14 +102,47 @@ class NUMADetector:
+         """
+ 
+         try:
+-            device_index = torch.cuda.current_device()
+-            pci_bus_id = get_gpu_pci_bus_id(device_index).lower()
++            accelerator = detect_runtime_accelerator()
++            if accelerator == "cuda":
++                device_index = torch.cuda.current_device()
++                physical_device_id = device_index
++            elif accelerator == "npu":
++                torch_npu = getattr(torch, "npu", None)
++                if torch_npu is None or not torch_npu.is_available():
++                    logger.warning("NPU runtime is not available for NUMA detection")
++                    return None
++                device_index = torch_npu.current_device()
++                current_platform = None
++                try:
++                    # Third Party
++                    from vllm.platforms import current_platform as detected_platform
++
++                    current_platform = detected_platform
++                except Exception:
++                    current_platform = None
++                physical_device_id = resolve_physical_device_id(
++                    current_platform, device_index
++                )
++            else:
++                logger.warning(
++                    "Auto NUMA mapping is not supported for accelerator=%s",
++                    accelerator,
++                )
++                return None
++
++            if get_gpu_pci_bus_id is None:
++                logger.warning("lmcache.c_ops.get_gpu_pci_bus_id is unavailable")
++                return None
++            pci_bus_id = get_gpu_pci_bus_id(physical_device_id).lower()
+ 
+             numa_node_file = f"/sys/bus/pci/devices/{pci_bus_id}/numa_node"
+             with open(numa_node_file) as f:
+                 numa_node = int(f.read())
+ 
+-            return NUMAMapping(gpu_to_numa_mapping={device_index: numa_node})
++            if numa_node >= 0:
++                return NUMAMapping(gpu_to_numa_mapping={device_index: numa_node})
++            logger.warning("No valid NUMA mapping for current device")
++            return None
+         except Exception as e:
+             logger.warning(f"Failed to auto read NUMA mapping from system: {e}")
+             return None

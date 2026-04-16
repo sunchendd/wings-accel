@@ -1,0 +1,23 @@
+文件路径	函数名	原有效代码行	修改后有效代码行	原起始代码行	修改后起始代码行
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py	patched_propose_draft_token_ids()		163		999
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py	resolve_speculative_token_settings()		59		109
+
+
+文件路径	原函数深度	修改后函数深度	函数名
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py		5	patched_propose_draft_token_ids()
+
+
+文件名	规则描述	规则类型	行号	提交人	代码详情	错误信息
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.EXP.04 推导式和生成器表达式仅用于简单的逻辑表达	通用编码规则	893	s00011552	                if isinstance(node, ast.Attribute)	Do not use more than two clauses or clauses that has more than one line.TestAdaptiveDraftModelPatchModule.test_patch_gpu_model_runner_routes_protected_helpers_through_call_member(complicate-comprehension)
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py	G.FMT.02 行宽不超过120个字符	通用编码规则	1267	s00011552	                    raise ValueError(f"target_hidden_states.shape[-1] {target_hidden_states.shape[-1]} != self.hidden_size {self.hidden_size}")	Line too long (143/120)(line-too-long)
+wings_engine_patch/wings_engine_patch/patch_vllm_container/v0_17_0/adaptive_draft_model_patch.py	G.FNM.07 建议妥善处理函数的返回值和异常	通用编码规则	1067	s00011552	                _call_member(	The return value and exception of the function are not processed_patch_gpu_model_runner_module.patched_propose_draft_token_ids(function-ret)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.FMT.02 行宽不超过120个字符	通用编码规则	933	s00011552	            "patched_propose_draft_token_ids should avoid a warning-level named parameter count across positional-only, standard, and keyword-only parameters",	Line too long (159/120)(line-too-long)
+wings_engine_patch/tests/test_build_wheel.py	G.FMT.07 导入部分(imports)应该按照标准库、第三方库、应用程序自定义模块的顺序排列导入	通用编码规则	6	s00011552	import zipfile	standard import "import zipfile" should be placed before "import tomllib"(wrong-import-order)
+wings_engine_patch/tests/test_build_wheel.py	G.FMT.07 导入部分(imports)应该按照标准库、第三方库、应用程序自定义模块的顺序排列导入	通用编码规则	7	s00011552	from unittest.mock import patch	standard import "from unittest.mock import patch" should be placed before "import tomllib"(wrong-import-order)
+wings_engine_patch/tests/test_build_wheel.py	G.FMT.07 导入部分(imports)应该按照标准库、第三方库、应用程序自定义模块的顺序排列导入	通用编码规则	5	s00011552	import unittest	standard import "import unittest" should be placed before "import tomllib"(wrong-import-order)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.EXP.04 推导式和生成器表达式仅用于简单的逻辑表达	通用编码规则	922	s00011552	            for arg in (	Do not use more than two clauses or clauses that has more than one line.TestAdaptiveDraftModelPatchModule.test_patch_gpu_model_runner_limits_named_parameters_on_patched_propose(complicate-comprehension)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.EXP.04 推导式和生成器表达式仅用于简单的逻辑表达	通用编码规则	265	s00011552	            if isinstance(node, ast.Import)	Do not use more than two clauses or clauses that has more than one line.TestAdaptiveDraftModelPatchModule.test_apply_confidence_threshold_uses_module_scope_torch(complicate-comprehension)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.FMT.02 行宽不超过120个字符	通用编码规则	908	s00011552	            "patched_propose_draft_token_ids should avoid direct protected helper access and use _call_member(self, ...)",	Line too long (122/120)(line-too-long)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.CLS.11 避免在类外或者子类中访问父类受保护的成员	通用编码规则	886	s00011552	            adaptive_draft_model_patch._patch_gpu_model_runner_module,	Access to a protected member _patch_gpu_model_runner_module of a client classTestAdaptiveDraftModelPatchModule.test_patch_gpu_model_runner_routes_protected_helpers_through_call_member(protected-access)
+wings_engine_patch/tests/test_adaptive_draft_model_patch.py	G.CLS.11 避免在类外或者子类中访问父类受保护的成员	通用编码规则	917	s00011552	            adaptive_draft_model_patch._patch_gpu_model_runner_module,	Access to a protected member _patch_gpu_model_runner_module of a client classTestAdaptiveDraftModelPatchModule.test_patch_gpu_model_runner_limits_named_parameters_on_patched_propose(protected-access)
+

@@ -1,0 +1,21 @@
+chunk_size: 256
+pre_caching_hash_algorithm: sha256_cbor
+local_cpu: true
+local_disk: /tmp/lmcache-data
+max_local_disk_size: 30
+extra_config:
+  wings:
+    cold_start:
+      enabled: true
+      manifest_path: /tmp/lmcache-data/.wings_cold_start_manifest.json
+      manifest_write_interval: 1
+    maintenance:
+      enabled: false
+    full_sync:
+      enabled: false
+    qat:
+      enabled: false
+      module_name: kv_agent
+      instance_num: 2
+      loss_level: 1
+      log_enabled: 1

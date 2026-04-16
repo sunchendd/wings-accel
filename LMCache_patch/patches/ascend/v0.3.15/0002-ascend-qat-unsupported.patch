@@ -1,0 +1,3 @@
+# PLACEHOLDER PATCH
+# Ascend QAT-disable logic now lives in overlay/common/lmcache/v1/wings_ext/qat/hooks.py
+# so this patch is intentionally skipped by apply_patchset.sh.

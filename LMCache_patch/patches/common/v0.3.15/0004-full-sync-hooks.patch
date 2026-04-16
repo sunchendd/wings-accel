@@ -1,0 +1,67 @@
+--- a/lmcache/v1/cache_controller/full_sync_sender.py
++++ b/lmcache/v1/cache_controller/full_sync_sender.py
+@@ -17,6 +17,10 @@
+     FullSyncStatusRetMsg,
+ )
+ from lmcache.v1.config import LMCacheEngineConfig
++from lmcache.v1.wings_ext.full_sync import (
++    after_full_sync_finish,
++    before_full_sync_start,
++)
+ 
+ if TYPE_CHECKING:
+     # First Party
+@@ -425,8 +429,20 @@
+             logger.warning("Full sync already in progress, skipping")
+             return False
+ 
++        decision = before_full_sync_start(self, reason)
++        if decision.skip:
++            logger.info(
++                "Skipping full sync for worker %s:%s: %s",
++                self.instance_id,
++                self.worker_id,
++                decision.message or "hook requested skip",
++            )
++            return False
++
++        reason = decision.reason
+         self._is_syncing = True
+         self._current_sync_id = None
++        success = False
+ 
+         logger.info(
+             "Starting full sync for worker %s:%s, reason: %s",
+@@ -436,6 +452,7 @@
+         )
+ 
+         try:
++            success = False
+             # Step 1: Initialize sync (delay, freeze, get keys, send start)
+             init_result = await self._initialize_sync(reason)
+             if init_result is None:
+@@ -449,12 +466,15 @@
+             )
+ 
+             # Step 3: Poll for completion status (with resend support)
+-            await self._poll_for_completion(
++            success = await self._poll_for_completion(
+                 init_result.sync_id,
+                 init_result.keys,
+                 init_result.total_keys,
+             )
++            if not success:
++                return False
+ 
++            success = True
+             logger.info("Full sync completed successfully")
+             return True
+ 
+@@ -464,6 +484,7 @@
+ 
+         finally:
+             # Always clean up state, regardless of success or failure
++            after_full_sync_finish(self, reason, success)
+             logger.info("Exiting freeze mode after full sync.")
+             self.lmcache_engine.freeze(False)
+             self._is_syncing = False

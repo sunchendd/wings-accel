@@ -1,0 +1,36 @@
+diff --git a/lmcache/integration/vllm/vllm_v1_adapter.py b/lmcache/integration/vllm/vllm_v1_adapter.py
+index 68c18ab..572fc96 100644
+--- a/lmcache/integration/vllm/vllm_v1_adapter.py
++++ b/lmcache/integration/vllm/vllm_v1_adapter.py
+@@ -40,6 +40,7 @@ from lmcache.v1.cache_engine import LMCacheEngine
+ from lmcache.v1.compute.blend import LMCBlenderBuilder
+ from lmcache.v1.config import LMCacheEngineConfig
+ from lmcache.v1.config_base import validate_and_set_config_value
++from lmcache.v1.wings_ext.maintenance import is_maintenance_mode_enabled
+ from lmcache.v1.manager import LMCacheManager
+ 
+ if TYPE_CHECKING:
+@@ -1071,6 +1072,10 @@ class LMCacheConnectorV1Impl:
+     def wait_for_save(self):
+         """Blocking until the KV cache is saved to the connector buffer."""
+ 
++        if is_maintenance_mode_enabled():
++            logger.info("[Save] Skipping save because Wings maintenance mode is enabled")
++            return 0
++
+         connector_metadata = self._parent._get_connector_metadata()
+         assert isinstance(connector_metadata, LMCacheConnectorMetadata)
+ 
+@@ -1216,6 +1221,12 @@ class LMCacheConnectorV1Impl:
+         # Ignore DP attention mock requests
+         if request.request_id.startswith("mock_req"):
+             return 0
++        if is_maintenance_mode_enabled():
++            logger.info(
++                "[Search] Request %s skipped because Wings maintenance mode is enabled",
++                request.request_id,
++            )
++            return 0
+         # to handle preempted requests, we want `get_num_new_matched_tokens` to be
+         # idempotent under the condition that `update_state_after_alloc` is NOT called
+         # then the two side-effects that must be idempotent are:

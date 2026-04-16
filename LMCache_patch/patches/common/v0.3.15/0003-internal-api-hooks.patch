@@ -1,0 +1,42 @@
+diff --git a/lmcache/v1/internal_api_server/api_server.py b/lmcache/v1/internal_api_server/api_server.py
+index f07ca7c..87c1c26 100644
+--- a/lmcache/v1/internal_api_server/api_server.py
++++ b/lmcache/v1/internal_api_server/api_server.py
+@@ -21,15 +21,13 @@ if TYPE_CHECKING:
+ 
+ logger = init_logger(__name__)
+ 
+-app = FastAPI()
+-
+-# Automatically register common, vllm, and controller APIs
+-registry = APIRegistry(app)
+-registry.register_all_apis(categories=["common", "vllm", "controller"])
+-
+ 
+ class InternalAPIServer:
+     def __init__(self, lmcache_manager: "LMCacheManager"):
++        self.app = FastAPI()
++        registry = APIRegistry(self.app)
++        registry.register_all_apis(categories=["common", "vllm", "controller"])
++
+         lmcache_engine = lmcache_manager.lmcache_engine
+ 
+         # Check if lmcache_engine is None and handle accordingly
+@@ -65,7 +63,7 @@ class InternalAPIServer:
+             return
+ 
+         uvicorn_config = {
+-            "app": app,
++            "app": self.app,
+             "host": config.internal_api_server_host,
+             "loop": "uvloop",
+             "http": "httptools",
+@@ -92,7 +90,7 @@ class InternalAPIServer:
+             uvicorn_config["port"] = self.port
+ 
+         self.server = uvicorn.Server(uvicorn.Config(**uvicorn_config))
+-        app.state.lmcache_adapter = lmcache_manager
++        self.app.state.lmcache_adapter = lmcache_manager
+ 
+     async def run(self):
+         logger.info(f"Running LMCache internal API server on {self.server_log_info}")

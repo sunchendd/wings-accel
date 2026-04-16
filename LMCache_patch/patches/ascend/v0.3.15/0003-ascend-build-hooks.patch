@@ -1,0 +1,63 @@
+diff --git a/lmcache/v1/kv_layer_groups.py b/lmcache/v1/kv_layer_groups.py
+index 5b1fb405..d7a4f81e 100644
+--- a/lmcache/v1/kv_layer_groups.py
++++ b/lmcache/v1/kv_layer_groups.py
+@@ -64,6 +64,9 @@ class KVLayerGroupInfo:
+         if len(self.shape) == 5:
+             # MHA
+             return self.shape[3] * self.shape[4]
++        elif len(self.shape) == 4:
++            # MHA with per-tensor K/V layout: [num_blocks, block_size, num_heads, head_size]
++            return self.shape[2] * self.shape[3]
+         elif len(self.shape) == 3:
+             # MLA
+             return self.shape[2]
+@@ -173,8 +176,22 @@ class KVLayerGroupsManager:
+         )
+ 
+         for idx, (layer_name, kv_cache) in enumerate(kv_caches.items()):
+-            shape = kv_cache.shape
+-            dtype = kv_cache.dtype
++            # Some backends (e.g. Ascend) provide per-layer KV as tuples
++            # like (k_cache, v_cache). Use tensor payload for grouping.
++            if isinstance(kv_cache, torch.Tensor):
++                kv_tensor = kv_cache
++            elif isinstance(kv_cache, (tuple, list)) and kv_cache and isinstance(
++                kv_cache[0], torch.Tensor
++            ):
++                kv_tensor = kv_cache[0]
++            else:
++                raise TypeError(
++                    f"Unsupported kv_cache type for layer {layer_name!r}: "
++                    f"{type(kv_cache).__name__}"
++                )
++
++            shape = kv_tensor.shape
++            dtype = kv_tensor.dtype
+             key = (shape, dtype)
+             groups_dict[key].append((layer_name, idx))
+ 
+diff --git a/lmcache/v1/rpc_utils.py b/lmcache/v1/rpc_utils.py
+index 80a65cbc..00b56d0c 100644
+--- a/lmcache/v1/rpc_utils.py
++++ b/lmcache/v1/rpc_utils.py
+@@ -1,6 +1,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ # Standard
+ from typing import Literal, Optional
++import hashlib
+ import os
+ import socket
+ 
+@@ -161,5 +162,11 @@ def get_zmq_rpc_path_lmcache(
+         f"{base_url}/engine_{engine_id}_service_{service_name}_"
+         f"lmcache_rpc_port_{rpc_port}"
+     )
++    ipc_path_max_len = getattr(zmq, "IPC_PATH_MAX_LEN", 107)
++    if len(socket_path) > ipc_path_max_len:
++        digest = hashlib.sha1(
++            f"{engine_id}:{service_name}:{rpc_port}".encode("utf-8")
++        ).hexdigest()[:16]
++        socket_path = f"{base_url}/lmcache_{service_name}_{rpc_port}_{digest}"
+ 
+     return socket_path

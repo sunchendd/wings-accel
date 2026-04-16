@@ -1,0 +1,5 @@
+recursive-include lib *.so*
+recursive-include lib *.a
+recursive-include lib *.dll
+recursive-include lib *.dylib
+recursive-include *.so *
