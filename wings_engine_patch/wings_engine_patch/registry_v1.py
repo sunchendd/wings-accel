@@ -36,8 +36,40 @@ def _build_vllm_v0_17_0_features():
     }
 
 
+def _build_vllm_v0_19_0_features():
+    from wings_engine_patch.patch_vllm_container.v0_19_0 import (
+        ears_patch,
+    )
+
+    return {
+        "features": {
+            "ears": [
+                ears_patch.patch_vllm_ears,
+            ],
+        }
+    }
+
+
 def _build_vllm_ascend_v0_17_0_features():
     from wings_engine_patch.patch_vllm_ascend_container.v0_17_0rc1 import (
+        draft_model_patch,
+        ears_patch,
+    )
+
+    return {
+        "features": {
+            "ears": [
+                ears_patch.patch_vllm_ears,
+            ],
+            "draft_model": [
+                draft_model_patch.patch_vllm_draft_model,
+            ],
+        }
+    }
+
+
+def _build_vllm_ascend_v0_18_0_features():
+    from wings_engine_patch.patch_vllm_ascend_container.v0_18_0rc1 import (
         draft_model_patch,
         ears_patch,
     )
@@ -67,14 +99,22 @@ def normalize_engine_name(inference_engine: str) -> str:
 _registered_patches = {
     'vllm': {
         "0.17.0": {
-            'is_default': True,
+            'is_default': False,
             'builder': _build_vllm_v0_17_0_features
+        },
+        "0.19.0": {
+            'is_default': True,
+            'builder': _build_vllm_v0_19_0_features
         }
     },
     'vllm-ascend': {
         "0.17.0rc1": {
-            'is_default': True,
+            'is_default': False,
             'builder': _build_vllm_ascend_v0_17_0_features
+        },
+        "0.18.0rc1": {
+            'is_default': True,
+            'builder': _build_vllm_ascend_v0_18_0_features
         }
     }
 }

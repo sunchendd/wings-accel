@@ -16,7 +16,7 @@ _ASCEND_VLLM_COMPAT_MODULES = (
     "vllm.v1.worker.gpu.spec_decode.eagle",
 )
 _PATCHED_ATTR = "_wings_ears_ascend_draft_compat_patched"
-_SUPPORTED_EARS_METHODS = ("eagle3", "mtp", "suffix")
+_SUPPORTED_EARS_METHODS = ("mtp", "suffix")
 
 
 @dataclass

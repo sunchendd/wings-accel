@@ -11,14 +11,18 @@ make build         # 产出 build/output/ 下的完整交付件
 # 2. 安装到推理环境
 cd build/output
 python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-python install.py --features '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 3. 运行时启用
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
+
+当前 `vllm-ascend` 默认补丁版本为 `0.18.0rc1`；如需旧容器，请显式传入 `0.17.0rc1`。
 
 ## 最终交付目录
 
@@ -32,7 +36,34 @@ python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 - `supported_features.json`
 - `wings-accel-package.tar.gz`
 
+默认还会额外产出当前架构对应的 LMCache 目录：
+
+- `lmcache_manifest.json`
+- `lmcache/<target>/lmcache-*.whl`
+- `lmcache/<target>/deps/*.whl`
+
 用户拿到这些文件后，无需依赖仓库其他源码文件。
+
+## LMCache 集成构建
+
+- 默认 `make build` 会附带构建当前架构对应的 LMCache 目标
+- 如需跳过，可设置 `WINGS_BUILD_LMCACHE=0`
+- 也可以单独执行 `make build-lmcache`
+
+宿主机架构与默认目标：
+
+- `x86_64` -> `nvidia-x86`
+- `aarch64` -> `ascend-arm`
+
+构建完成后会生成 `build/output/lmcache_manifest.json`，安装器会按目标选择正确 wheel。可直接使用：
+
+```bash
+cd build/output
+python install.py --features '{"lmcache": {"target": "nvidia-x86"}}'
+python install.py --features '{"lmcache": {"target": "ascend-arm"}}'
+# 兼容旧调用方式
+python install.py --lmcache-target nvidia-x86
+```
 
 ## 用户使用方式
 
@@ -44,12 +75,14 @@ cd build/output
 python3 install.py --install-runtime-deps
 
 # 3. 安装补丁包（按上游 JSON 传参方式选择要启用的补丁）
-python3 install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-python3 install.py --features '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 4. 运行前设置环境变量
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 5. 启动 vLLM
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
@@ -58,7 +91,7 @@ python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
 如果只想先检查安装命令，不实际执行，可以用：
 
 ```bash
-python3 install.py --dry-run --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --dry-run --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 ```
 
 ## 支持的引擎与特性
@@ -69,17 +102,21 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
-| vllm / vllm-ascend | 0.17.0 | ears | 为 Ascend / NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样；Ascend 仅保证功能支持，不保证性能 |
-| vllm / vllm-ascend | 0.17.0 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
-| vllm / vllm-ascend | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
+| vllm | 0.19.0 | ears | 为 NVIDIA 上的 `mtp` 和 `suffix` 投机解码启用 EARS 拒绝采样（默认版本）|
+| vllm-ascend | 0.18.0rc1 | ears | 为 `vllm-ascend` 0.18.0rc1 的 `mtp` / `suffix` 投机解码启用 EARS；`eagle3` 不启用并打印 warning，不保证性能 |
+| vllm-ascend | 0.18.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
+| vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
+| vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
+| vllm-ascend | 0.17.0rc1 | ears | 为 Ascend 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样；仅保证功能支持，不保证性能 |
+| vllm-ascend | 0.17.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
 
 ## vllm-ascend draft_model 用法
 
-单独启用 `draft_model`：
+推荐使用下面这组 canonical 配置；安装命令和 `WINGS_ENGINE_PATCH_OPTIONS` 保持同一份 JSON：
 
 ```bash
-python3 install.py --features '{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
 
 vllm serve /data/Qwen3-8B \
   --tensor-parallel-size 1 \
@@ -92,16 +129,16 @@ vllm serve /data/Qwen3-8B \
   --speculative-config '{"model":"/data/Qwen3-0.6B","method":"draft_model","num_speculative_tokens":8,"parallel_drafting":false}'
 ```
 
-组合启用 `ears` + `draft_model`：
+`draft_model` 当前仅承诺功能正确性；如需旧版行为，可把版本改为 `0.17.0rc1`。`ears` 在 `0.18.0rc1` 仅覆盖 `mtp` / `suffix`，若配置成 `eagle3` 会跳过 EARS 并打印 warning。组合启用 `ears` + `draft_model` 的配置入口也已打通：
 
 ```bash
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0", "features": ["ears", "draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears", "draft_model"]}}'
 ```
 
 关键日志可关注：
 
 ```text
-[wins-accel] adaptive_draft_model patch enabled
+[wins-accel] draft_model patch enabled
 speculative_config': {'model': '/data/Qwen3-0.6B', 'method': 'draft_model', ...}
 Loading drafter model...
 ```

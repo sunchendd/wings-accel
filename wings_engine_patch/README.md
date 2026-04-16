@@ -5,7 +5,7 @@ Wings Engine Patch is a lightweight, dynamic patching framework designed to inje
 ## Key Features
 
 *   **Non-Intrusive**: Patches are applied at runtime using Python's import hooks and `wrapt`, ensuring the original package installation remains pristine.
-*   **Version Controlled**: Patches are strictly scoped to specific engine versions (e.g., `vllm` version `0.17.0`).
+*   **Version Controlled**: Patches are strictly scoped to specific engine versions (for example default `vllm` `0.19.0` and legacy `0.17.0`).
 *   **Feature-Based Management**: Patches are grouped into named "features" (for example `ears`). Users enable features, not individual files.
 *   **Intelligent Dependency Resolution**:
     *   **Shared Patches**: If multiple features rely on the same underlying patch implementation, enabling one automatically activates the shared components.
@@ -27,7 +27,9 @@ make install     # build + pip install into current environment
 
 ```bash
 python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 ```
 
 **Manual (advanced):**
@@ -55,12 +57,12 @@ Enable patches by setting the `WINGS_ENGINE_PATCH_OPTIONS` environment variable 
 
 ### Example
 
-To enable the `ears` patch for `vllm` version `0.17.0` on Ascend or NVIDIA:
+To enable the `ears` patch for `vllm` version `0.19.0` on NVIDIA:
 
 ```bash
 export WINGS_ENGINE_PATCH_OPTIONS='{
     "vllm": {
-        "version": "0.17.0",
+        "version": "0.19.0",
         "features": ["ears"]
     }
 }'
@@ -68,7 +70,32 @@ export WINGS_ENGINE_PATCH_OPTIONS='{
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
-`ears` is the only public vLLM `0.17.0` feature in this delivery. It provides functional support for `mtp`, `eagle3`, and `suffix` speculative decoding on NVIDIA and Ascend. Ascend support is correctness-oriented only and does not include a performance guarantee. `sparse_kv` is intentionally excluded from this delivery.
+`ears` is the default public vLLM `0.19.0` feature in this delivery. It provides functional support for `mtp` and `suffix` speculative decoding on NVIDIA. Legacy `vllm` `0.17.0` remains available when explicitly requested, and continues to expose both `ears` and `sparse_kv`. Ascend support remains version-specific and correctness-oriented only; it does not include a performance guarantee.
+
+Canonical `vllm-ascend` examples (`0.18.0rc1` is the default patch set; `0.17.0rc1` remains available only when explicitly requested):
+
+```bash
+export WINGS_ENGINE_PATCH_OPTIONS='{
+    "vllm-ascend": {
+        "version": "0.18.0rc1",
+        "features": ["draft_model"]
+    }
+}'
+
+export WINGS_ENGINE_PATCH_OPTIONS='{
+    "vllm-ascend": {
+        "version": "0.18.0rc1",
+        "features": ["ears"]
+    }
+}'
+```
+
+`draft_model` on `vllm-ascend` `0.18.0rc1` is functional-only in this delivery and does not include a performance guarantee. The public `ears` entry on `0.18.0rc1` is limited to `mtp` and `suffix`; `eagle3` leaves the native sampler in place and logs a warning. `["ears", "draft_model"]` can be wired together through the same JSON payload.
+
+```bash
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
+```
 
 > **Note**: If the configured version matches the installed engine version, patches are applied. If there is a mismatch, the system may attempt to fall back to a default version configuration if one is defined in the registry.
 
@@ -94,7 +121,7 @@ wings_engine_patch/
     *   Use `wrapt.register_post_import_hook` to safely patch modules *after* they are imported.
 
 2.  **Register the Patch**: Update `wings_engine_patch/registry.py`.
-    *   Import your patch function inside the appropriate version builder function (e.g., `_build_vllm_v0_17_0_features`).
+    *   Import your patch function inside the appropriate version builder function (e.g., `_build_vllm_v0_19_0_features`).
     *   Add the patch function object directly to the feature list.
 
 ### Critical Patch Development Rules & Best Practices
@@ -123,4 +150,4 @@ wings_engine_patch/
 
 ### Feature Propagation and Patch Deduplication
 
-The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In this repository, `ears` is the public runtime feature shipped for vLLM `0.17.0`.
+The registry supports deduplicating shared patch functions and can still expand related features when multiple features reference the same patch. In this repository, `ears` is the public runtime feature shipped for vLLM `0.19.0` (default version) and `0.17.0` (legacy version).

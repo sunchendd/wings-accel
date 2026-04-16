@@ -70,6 +70,17 @@ def test_find_local_wrapt_wheel_matches_current_architecture_when_multiple_arch_
     assert install_module._find_local_wheel_by_prefix("wrapt").name == expected_name  # pylint: disable=protected-access
 
 
+def test_find_local_wrapt_wheel_skips_wrong_architecture_wheels_without_generic_fallback(tmp_path, monkeypatch):
+    wrapt_x86_wheel = tmp_path / "wrapt-2.1.2-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.whl"
+    wrapt_x86_wheel.write_text("wheel", encoding="utf-8")
+
+    monkeypatch.setattr(install_module, "_BASE_DIR", tmp_path)
+    monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
+    monkeypatch.setattr(install_module.platform, "machine", lambda: "aarch64")
+
+    assert install_module._find_local_wheel_by_prefix("wrapt") is None  # pylint: disable=protected-access
+
+
 def test_find_local_runtime_dep_wheel_in_build_output(tmp_path, monkeypatch):
     packaging_wheel = tmp_path / "build" / "output" / "packaging-26.0-py3-none-any.whl"
     packaging_wheel.parent.mkdir(parents=True)
@@ -124,6 +135,10 @@ def test_local_feature_wheel_install_does_not_force_reinstall(monkeypatch, tmp_p
     assert "--force-reinstall" not in commands[0]
 
 
+def test_feature_local_wheels_keep_sparse_kv_mapping():
+    assert install_module._FEATURE_LOCAL_WHEELS["sparse_kv"][0] == "vsparse"  # pylint: disable=protected-access
+
+
 def test_future_vllm_version_warns_and_preserves_requested_public_features(monkeypatch):
     calls = []
     captured_stderr = io.StringIO()
@@ -135,12 +150,12 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
             "install.py",
             "--dry-run",
             "--features",
-            '{"vllm": {"version": "0.18.0", "features": ["ears"]}}',
+            '{"vllm": {"version": "0.20.0", "features": ["ears"]}}',
         ],
     )
     monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
 
-    def fake_install_engine(engine_name, version, features, dry_run=False):
+    def fake_install_engine(engine_name, version, features, dry_run=False, **_kwargs):
         calls.append((engine_name, version, features, dry_run))
 
     monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
@@ -148,7 +163,7 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
     with suppress(SystemExit):
         install_module.main()
 
-    assert calls == [("vllm", "0.17.0", ["ears"], True)]
+    assert calls == [("vllm", "0.19.0", ["ears"], True)]
     assert "newer than the highest validated version" in captured_stderr.getvalue()
 
 
@@ -174,6 +189,56 @@ def test_vllm_ascend_stable_tag_is_rejected():
             "0.17.0",
             manifest_data["engines"]["vllm-ascend"],
         )
+
+
+def test_vllm_ascend_future_release_falls_back_to_default_rc1(monkeypatch):
+    manifest_data = install_module.load_supported_features()
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+
+    resolved_version, version_spec = install_module.resolve_version(
+        "vllm-ascend",
+        "0.18.1",
+        manifest_data["engines"]["vllm-ascend"],
+    )
+
+    assert resolved_version == "0.18.0rc1"
+    assert set(version_spec["features"].keys()) == {"ears", "draft_model"}
+    assert "newer than the highest validated version" in captured_stderr.getvalue()
+
+
+def test_duplicate_vllm_ascend_aliases_are_rejected_before_install(monkeypatch):
+    captured_stderr = io.StringIO()
+    install_calls = []
+
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            (
+                '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}, '
+                '"vllm_ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+            ),
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+    monkeypatch.setattr(
+        install_module,
+        "install_engine",
+        lambda engine_name, version, features, dry_run=False: install_calls.append(
+            (engine_name, version, tuple(features), dry_run)
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        install_module.main()
+
+    assert install_calls == []
+    assert "duplicate engine alias keys are not allowed" in captured_stderr.getvalue()
 
 
 def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_arctic(
@@ -268,3 +333,64 @@ def test_find_arctic_inference_wheel_supports_flat_delivery_variants(tmp_path, m
     monkeypatch.setattr(install_module, "_LOCAL_WHEEL_DIR", tmp_path / "build" / "output")
 
     assert install_module._find_arctic_inference_whl() == arctic_wheel  # pylint: disable=protected-access
+
+
+def test_auto_patch_vllm_0191_falls_back_to_0190_with_ears(monkeypatch):
+    """When user specifies vllm 0.19.1 with ears, install.py warns and uses 0.19.0."""
+    import types
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            '{"vllm": {"version": "0.19.1", "features": ["ears"]}}',
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+
+    calls = []
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
+        calls.append((engine_name, version, features, dry_run))
+
+    monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
+
+    with suppress(SystemExit):
+        install_module.main()
+
+    assert calls == [("vllm", "0.19.0", ["ears"], True)]
+    stderr = captured_stderr.getvalue()
+    assert "Trying default version '0.19.0'" in stderr
+
+
+def test_auto_patch_vllm_ascend_0181rc1_falls_back_to_0180rc1_with_ears(monkeypatch):
+    """When user specifies vllm-ascend 0.18.1rc1 with ears, install.py warns and uses 0.18.0rc1."""
+    captured_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stderr", captured_stderr)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "install.py",
+            "--dry-run",
+            "--features",
+            '{"vllm-ascend": {"version": "0.18.1rc1", "features": ["ears"]}}',
+        ],
+    )
+    monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
+
+    calls = []
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
+        calls.append((engine_name, version, features, dry_run))
+
+    monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
+
+    with suppress(SystemExit):
+        install_module.main()
+
+    assert calls == [("vllm-ascend", "0.18.0rc1", ["ears"], True)]
+    stderr = captured_stderr.getvalue()
+    assert "Trying default version '0.18.0rc1'" in stderr

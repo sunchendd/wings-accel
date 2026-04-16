@@ -1,12 +1,15 @@
 """Ascend-specific EARS (Entropy Adaptive Rejection Sampling) patches for vLLM."""
 
 import logging
-import os
 import sys
 
+from wings_engine_patch.patch_common.ears_core import (
+    SUPPORTED_EARS_METHODS,
+    maybe_enable_sampler as _maybe_enable_ears_sampler_core,
+    parse_ears_tolerance as _read_ears_tolerance,
+)
 from wings_engine_patch.patch_vllm_container.v0_17_0.ears_patch import (
     _get_entropy_adaptive_rejection_sampler_class,
-    _read_ears_tolerance,
     log_runtime_state,
 )
 
@@ -16,7 +19,7 @@ from .ears_ascend_compat import patch_vllm_ascend_draft_compat as _patch_vllm_as
 
 
 LOGGER = logging.getLogger("wings_accel.ears_ascend")
-_SUPPORTED_EARS_METHODS = {"mtp", "eagle3", "suffix"}
+_SUPPORTED_EARS_METHODS = SUPPORTED_EARS_METHODS  # Re-export for backward compatibility
 
 
 def _register_or_apply_post_import_hook(module_name, patcher) -> None:
@@ -28,25 +31,11 @@ def _register_or_apply_post_import_hook(module_name, patcher) -> None:
 
 
 def _maybe_enable_ears_sampler(runner) -> None:
-    spec_config = getattr(runner, "speculative_config", None)
-    method = getattr(spec_config, "method", None)
-    tolerance = _read_ears_tolerance()
-
-    if tolerance <= 0.0:
-        return
-    if method not in _SUPPORTED_EARS_METHODS:
-        return
-    if getattr(runner, "rejection_sampler", None) is None:
-        return
-    if getattr(runner, "sampler", None) is None:
-        return
-
-    sampler_cls = _get_entropy_adaptive_rejection_sampler_class()
-    runner.rejection_sampler = sampler_cls(
-        runner.sampler,
-        base_tolerance=tolerance,
-    )
-    log_runtime_state("ears sampler enabled (ascend)", method=method, base_tolerance=tolerance)
+    tolerance = _read_ears_tolerance({})
+    if _maybe_enable_ears_sampler_core(runner, base_tolerance=tolerance):
+        spec_config = getattr(runner, "speculative_config", None)
+        method = getattr(spec_config, "method", None)
+        log_runtime_state("ears sampler enabled (ascend)", method=method, base_tolerance=tolerance)
 
 
 def patch_vllm_ascend_draft_compat(module) -> None:

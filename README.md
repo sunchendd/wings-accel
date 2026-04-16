@@ -11,14 +11,18 @@ make build         # 产出 build/output/ 下的完整交付件
 # 2. 安装到推理环境
 cd build/output
 python install.py --install-runtime-deps
-python install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-python install.py --features '{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 3. 运行时启用
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
+
+当前 `vllm-ascend` 默认补丁版本为 `0.18.0rc1`；如需旧容器，请显式传入 `0.17.0rc1`。
 
 ## 最终交付目录
 
@@ -35,83 +39,31 @@ python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 默认还会额外产出当前架构对应的 LMCache 目录：
 
 - `lmcache_manifest.json`
-- `lmcache/nvidia-x86/lmcache-*.whl`
-- `lmcache/ascend-arm/lmcache-*.whl`
+- `lmcache/<target>/lmcache-*.whl`
 - `lmcache/<target>/deps/*.whl`
-
-其中 NVIDIA x86 目录还可能包含可选的 `kv_agent-*.whl`。
 
 用户拿到这些文件后，无需依赖仓库其他源码文件。
 
 ## LMCache 集成构建
 
-LMCache 采用 patch-first 构建链，与当前 `wings_engine_patch` 的纯 monkey-patch 交付模式不同，因此在仓库中按独立产物线接入。
-
-当前第一阶段集成方式：
-
-- 默认 `make build` 会在现有交付流程中附加构建当前架构对应的 LMCache 目标
-- 如需临时关闭，可设置 `WINGS_BUILD_LMCACHE=0`
+- 默认 `make build` 会附带构建当前架构对应的 LMCache 目标
+- 如需跳过，可设置 `WINGS_BUILD_LMCACHE=0`
 - 也可以单独执行 `make build-lmcache`
 
-LMCache 目标矩阵：
-
-- `nvidia-x86`
-- `ascend-arm`
-
-`build/build.sh` 会根据宿主机架构自动选择默认目标：
+宿主机架构与默认目标：
 
 - `x86_64` -> `nvidia-x86`
 - `aarch64` -> `ascend-arm`
 
-构建完成后会生成 `build/output/lmcache_manifest.json`，用于后续安装器或发布流程按目标选择正确 wheel。
-
-LMCache 安装器已接入顶层 `install.py`，可直接使用：
+构建完成后会生成 `build/output/lmcache_manifest.json`，安装器会按目标选择正确 wheel。可直接使用：
 
 ```bash
 cd build/output
+python install.py --features '{"lmcache": {"target": "nvidia-x86"}}'
+python install.py --features '{"lmcache": {"target": "ascend-arm"}}'
+# 兼容旧调用方式
 python install.py --lmcache-target nvidia-x86
-python install.py --lmcache-target ascend-arm
 ```
-
-该模式会读取 `lmcache_manifest.json`，先从本地 `lmcache/<target>/deps/` 离线安装 LMCache 依赖 wheel，再按目标安装主 wheel；如果目标目录下还存在伴随 wheel，例如 NVIDIA x86 下的 `kv_agent-*.whl`，也会一并安装。LMCache 主 wheel 和 companion wheel 仍默认使用 `--no-deps`，避免在已准备好的运行环境里重新解析 `torch` 等大依赖。
-
-构建阶段还会基于 `lmcache-*.whl` 的 `Requires-Dist` 元数据，预下载该目标对应的 LMCache 依赖 wheel 到 `lmcache/<target>/deps/`。安装时会优先从这些本地 wheel 离线安装依赖，再安装 LMCache 主 wheel 和 companion wheel，避免客户环境联网拉取如 `aiofile`、`cupy-cuda12x`、`redis`、`numpy` 等依赖。
-
-当前容器镜像命名沿用仓库已有规则，可通过环境变量覆盖：
-
-- `WINGS_LMCACHE_NVIDIA_X86_IMAGE`
-- `WINGS_LMCACHE_ASCEND_ARM_IMAGE`
-
-如果 `nvidia-x86` 构建镜像只带 CUDA runtime、缺少 `cusparse.h` 等开发头文件，可以额外设置：
-
-- `WINGS_LMCACHE_CUDA_HOME`：宿主机上的 CUDA toolkit 根目录，会只读挂载到容器内 `/opt/wings-cuda`
-
-NVIDIA LMCache 的 `c_ops` 编译依赖 CUDA 开发头；`cusparse.h` 缺失属于 CUDA toolkit 问题，不是 QATzip 映射问题。
-
-NVIDIA x86 如需在容器里一并产出 `kv_agent`，还可以显式提供 QAT 输入：
-
-- `WINGS_LMCACHE_QAT_PACKAGE_ROOT`：宿主机上的离线 QAT 包目录，会复制到容器内并映射为 `QAT_PACKAGE_ROOT`
-- `WINGS_LMCACHE_QAT_RUNTIME_ROOT`：宿主机上的已整理运行时目录，要求包含 `include/` 和 `lib/`，会复制到容器内并映射为 `QATZIP_INCLUDE_DIR`/`QATZIP_LIB_DIR`
-
-`LMCache` 和 `QATzip` 都固定使用 `LMCache_patch/manifest/lmcache.lock.json` 中写死的 artifact 链接：
-
-- `https://artifactrepo.wux-g.tools.xfusion.com/artifactory/opensource_general/LMCache/v0.3.15/package/LMCache-0.3.15.tar.gz`
-- `https://artifactrepo.wux-g.tools.xfusion.com/artifactory/opensource_general/QAT/v1.3.2/package/QATzip-1.3.2.tar.gz`
-
-如本地不存在对应 tarball，`LMCache_patch` 流程会自动下载到 `upstream_sources/` 和 `third_party_sources/qatzip/`。如果本地已放置 tarball，则仍会按 lock 中的文件名、目录名和版本约束使用对应版本。
-
-Ascend 路径额外固定从 `ssh://git@git.codehub.xfusion.com:2222/OpenSourceCenter/kvcache-ops.git` 准备 `kvcache-ops`，仓库内不再保留 vendored 源码目录。
-
-默认占位值：
-
-- NVIDIA x86：复用现有 x86 构建镜像
-- Ascend arm：`docker.artifactrepo.wux-g.tools.xfusion.com/ai_solution/ci/wings/ascend/arm/vllm-openai_cmake_3.30.3:v0.17.0`
-
-说明：
-
-- `nvidia-x86` 走 `LMCache_patch/install.py build-wheel`
-- `ascend-arm` 走 `prepare-ascend-sources` + `build-wheel --platform ascend`
-- Ascend 路径继续保持 QAT 不支持的现有规则
 
 ## 用户使用方式
 
@@ -123,12 +75,14 @@ cd build/output
 python3 install.py --install-runtime-deps
 
 # 3. 安装补丁包（按上游 JSON 传参方式选择要启用的补丁）
-python3 install.py --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-python3 install.py --features '{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 4. 运行前设置环境变量
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears"]}}'
 
 # 5. 启动 vLLM
 python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
@@ -137,7 +91,7 @@ python3 -m vllm.entrypoints.openai.api_server --model /path/to/model
 如果只想先检查安装命令，不实际执行，可以用：
 
 ```bash
-python3 install.py --dry-run --features '{"vllm": {"version": "0.17.0", "features": ["ears"]}}'
+python3 install.py --dry-run --features '{"vllm": {"version": "0.19.0", "features": ["ears"]}}'
 ```
 
 ## 支持的引擎与特性
@@ -148,18 +102,21 @@ python install.py --list
 
 | 引擎 | 版本 | 特性 | 说明 |
 |---|---|---|---|
+| vllm | 0.19.0 | ears | 为 NVIDIA 上的 `mtp` 和 `suffix` 投机解码启用 EARS 拒绝采样（默认版本）|
+| vllm-ascend | 0.18.0rc1 | ears | 为 `vllm-ascend` 0.18.0rc1 的 `mtp` / `suffix` 投机解码启用 EARS；`eagle3` 不启用并打印 warning，不保证性能 |
+| vllm-ascend | 0.18.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
 | vllm | 0.17.0 | ears | 为 NVIDIA 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 EARS 拒绝采样 |
+| vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
 | vllm-ascend | 0.17.0rc1 | ears | 为 Ascend 上的 `mtp`、`eagle3` 和 `suffix` 投机解码启用 cross-architecture EARS 拒绝采样；仅保证功能支持，不保证性能 |
 | vllm-ascend | 0.17.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
-| vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
 
 ## vllm-ascend draft_model 用法
 
-单独启用 `draft_model`：
+推荐使用下面这组 canonical 配置；安装命令和 `WINGS_ENGINE_PATCH_OPTIONS` 保持同一份 JSON：
 
 ```bash
-python3 install.py --features '{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0rc1", "features": ["draft_model"]}}'
+python3 install.py --features '{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["draft_model"]}}'
 
 vllm serve /data/Qwen3-8B \
   --tensor-parallel-size 1 \
@@ -172,16 +129,16 @@ vllm serve /data/Qwen3-8B \
   --speculative-config '{"model":"/data/Qwen3-0.6B","method":"draft_model","num_speculative_tokens":8,"parallel_drafting":false}'
 ```
 
-组合启用 `ears` + `draft_model`：
+`draft_model` 当前仅承诺功能正确性；如需旧版行为，可把版本改为 `0.17.0rc1`。`ears` 在 `0.18.0rc1` 仅覆盖 `mtp` / `suffix`，若配置成 `eagle3` 会跳过 EARS 并打印 warning。组合启用 `ears` + `draft_model` 的配置入口也已打通：
 
 ```bash
-export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0rc1", "features": ["ears", "draft_model"]}}'
+export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.18.0rc1", "features": ["ears", "draft_model"]}}'
 ```
 
 关键日志可关注：
 
 ```text
-[wins-accel] adaptive_draft_model patch enabled
+[wins-accel] draft_model patch enabled
 speculative_config': {'model': '/data/Qwen3-0.6B', 'method': 'draft_model', ...}
 Loading drafter model...
 ```
