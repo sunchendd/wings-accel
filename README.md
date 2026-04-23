@@ -153,6 +153,25 @@ python install.py --list
 | vllm-ascend | 0.17.0rc1 | draft_model | 为 `vllm-ascend` 提供功能级 `draft_model` 草稿模型支持，可单独启用，不保证性能 |
 | vllm | 0.17.0 | sparse_kv | 启用 sparse KV cache 管理能力 |
 
+### 版本匹配规则
+
+当用户请求的版本没有精确命中已注册补丁版本时，`install.py` 和运行时 `registry_v1.py` 使用同一套匹配规则：
+
+1. 精确命中优先
+2. 否则取最近的 `<= user_version` 的已注册版本
+3. 如果向下找不到，再取最近的更高版本（也就是最小已注册版本）
+
+例如已注册版本为 `0.17`、`0.19` 时：
+
+- `0.15 -> 0.17`
+- `0.17 -> 0.17`
+- `0.18 -> 0.17`
+- `0.19 -> 0.19`
+- `0.20 -> 0.19`
+- `0.25 -> 0.19`
+
+`is_default` 现在**不再参与版本匹配决策**；它仍然保留在 manifest 中，用于 schema 约束和 `install.py --list` 的默认版本标记展示。
+
 ## vllm-ascend draft_model 用法
 
 单独启用 `draft_model`：

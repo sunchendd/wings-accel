@@ -154,16 +154,6 @@ def validate_schema(data: dict) -> None:
 # Version resolution
 # ---------------------------------------------------------------------------
 
-def _get_default_version_spec(engine_name: str, versions: dict) -> tuple[str, dict]:
-    for ver, spec in versions.items():
-        if spec.get("is_default", False):
-            return ver, spec
-    raise ValueError(
-        f"Engine '{engine_name}' has no default version (is_default: true). "
-        "Exactly one version must be marked as default."
-    )
-
-
 def _get_packaging_version_types():
     try:
         from packaging.version import InvalidVersion, Version
@@ -210,37 +200,21 @@ def _classify_requested_version(
     if not parsed_versions:
         raise ValueError(f"Engine '{engine_name}' has no versions defined.")
 
-    min_supported, min_version_str, _ = parsed_versions[0]
-    max_supported, max_version_str, _ = parsed_versions[-1]
+    lower_or_equal_versions = [
+        (parsed_version, version_str, spec)
+        for parsed_version, version_str, spec in parsed_versions
+        if parsed_version <= requested
+    ]
+    if lower_or_equal_versions:
+        _, compatible_version, compatible_spec = lower_or_equal_versions[-1]
+        return "compatible_match", compatible_version, compatible_spec
 
-    if (
-        not requested.is_prerelease
-        and max_supported.is_prerelease
-        and requested.release == max_supported.release
-    ):
-        raise ValueError(
-            f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
-            f"Supported versions: {sorted(versions.keys())}."
-        )
-
-    if requested < min_supported:
-        raise ValueError(
-            f"Version '{requested_version}' for engine '{engine_name}' is older than the minimum "
-            f"supported patched version '{min_version_str}'. Historical versions are not supported."
-        )
-
-    if requested > max_supported:
-        default_version, default_spec = _get_default_version_spec(engine_name, versions)
-        return "future_fallback", default_version, default_spec
-
-    raise ValueError(
-        f"Version '{requested_version}' for engine '{engine_name}' is not a validated patched version. "
-        f"Supported versions: {sorted(versions.keys())}."
-    )
+    _, compatible_version, compatible_spec = parsed_versions[0]
+    return "compatible_match", compatible_version, compatible_spec
 
 
 def resolve_version(engine_name: str, requested_version: str, engine_spec: dict):
-    """Resolve version with explicit old-version rejection and future fallback.
+    """Resolve version using exact match, floor match, then minimum-version fallback.
 
     Returns (resolved_version_str, version_spec_dict).
     """
@@ -251,13 +225,10 @@ def resolve_version(engine_name: str, requested_version: str, engine_spec: dict)
         versions,
     )
 
-    if resolution_kind == "future_fallback":
-        supported_versions = _parse_supported_versions(engine_name, versions)
-        highest_validated_version = supported_versions[-1][1]
+    if resolution_kind == "compatible_match":
         stderr_logger.warning(
-            f"[wings-accel] Warning: version '{requested_version}' is newer than the highest "
-            f"validated version '{highest_validated_version}' for engine '{engine_name}'. "
-            f"Trying default version '{resolved_version}'."
+            f"[wings-accel] Warning: version '{requested_version}' for engine '{engine_name}' "
+            f"is not registered exactly. Using nearest compatible version '{resolved_version}'."
         )
 
     return resolved_version, version_spec

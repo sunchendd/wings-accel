@@ -57,17 +57,32 @@ class TestWingsPatchMechanism(unittest.TestCase):
         with patch('sys.stderr', captured):
             registry_v1.enable('test_engine', ['feature_match'], version='9.9.9')
         self.assertFalse(dummy_patch.PATCH_APPLIED, "Should not apply patch because feature is missing in default version")
-        self.assertIn("newer than highest validated version", captured.getvalue())
+        self.assertIn("Using nearest compatible patch set '2.0.0'", captured.getvalue())
 
     def test_03_future_version_fallback_success(self):
         """A newer unvalidated version should use the default patch set when it succeeds."""
         registry_v1.enable('test_engine', ['feature_w_default'], version='9.9.9')
         self.assertTrue(dummy_patch.PATCH_APPLIED, "Should automatically fallback to default version for unknown version")
 
-    def test_04_old_version_raises(self):
-        with self.assertRaises(registry_v1.UnsupportedVersionError) as ctx:
+    def test_04_lower_than_all_registered_versions_uses_nearest_higher_patch_set(self):
+        captured = io.StringIO()
+        with patch('sys.stderr', captured):
             registry_v1.enable('test_engine', ['feature_match'], version='0.9.0')
-        self.assertIn("Historical versions are not supported", str(ctx.exception))
+        self.assertTrue(dummy_patch.PATCH_APPLIED)
+        self.assertIn("Using nearest compatible patch set '1.0.0'", captured.getvalue())
+
+    def test_05_gap_version_uses_nearest_lower_registered_patch_set(self):
+        registry_v1._registered_patches['test_engine']['3.0.0'] = {
+            'is_default': False,
+            'features': {
+                'feature_newest': [dummy_patch.mock_patch_func]
+            }
+        }
+        captured = io.StringIO()
+        with patch('sys.stderr', captured):
+            registry_v1.enable('test_engine', ['feature_w_default'], version='2.5.0')
+        self.assertTrue(dummy_patch.PATCH_APPLIED)
+        self.assertIn("Using nearest compatible patch set '2.0.0'", captured.getvalue())
 
     def test_06_unknown_feature_warns_only(self):
         """Test that enabling an unknown feature acts gracefully (prints warning)."""
@@ -110,7 +125,7 @@ class TestWingsPatchMechanism(unittest.TestCase):
         with self.assertRaises(registry_v1.ForwardCompatibilityPatchError) as ctx:
             registry_v1.enable('test_engine', ['future_bad_feat'], version='9.9.9')
         # pylint: enable=protected-access
-        self.assertIn("Tried default patch set '2.0.0'", str(ctx.exception))
+        self.assertIn("resolved to compatible patch set '2.0.0'", str(ctx.exception))
         self.assertIn('bad_patch', str(ctx.exception))
 
     def test_enable_unknown_engine_returns_empty(self):
@@ -139,11 +154,10 @@ class TestWingsPatchMechanism(unittest.TestCase):
             failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0rc1')
         self.assertEqual(failures, [])
 
-    def test_enable_rejects_vllm_ascend_stable_tag_without_rc1(self):
+    def test_enable_maps_vllm_ascend_stable_tag_to_nearest_lower_rc1(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
-            with self.assertRaises(registry_v1.UnsupportedVersionError) as ctx:
-                registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
-        self.assertIn("not a validated patched version", str(ctx.exception))
+            failures = registry_v1.enable('vllm-ascend', ['draft_model'], version='0.17.0')
+        self.assertEqual(failures, [])
 
     def test_enable_standalone_draft_model_feature(self):
         with patch.object(registry_v1, "_registered_patches", self.original_registry):
@@ -241,16 +255,16 @@ class TestAutoPatchModule(unittest.TestCase):
             rv1._registered_patches = orig
         self.assertIn('exploding_patch', buf.getvalue())
 
-    def test_auto_patch_old_version_raises(self):
+    def test_auto_patch_old_version_uses_nearest_higher_patch_set(self):
         import importlib
         import wings_engine_patch._auto_patch as ap_mod
 
+        buf = io.StringIO()
         opts = json.dumps({'vllm': {'version': '0.12.0', 'features': ['ears']}})
-        with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}, clear=False):
-            # pylint: disable=avoid-using-exit
-            with self.assertRaises(SystemExit):
+        with patch('sys.stderr', buf):
+            with patch.dict(os.environ, {'WINGS_ENGINE_PATCH_OPTIONS': opts}, clear=False):
                 importlib.reload(ap_mod)
-            # pylint: enable=avoid-using-exit
+        self.assertIn("Using nearest compatible patch set '0.17.0'", buf.getvalue())
 
     def test_auto_patch_future_version_patch_failure_raises(self):
         import importlib
@@ -322,8 +336,7 @@ class TestAutoPatchModule(unittest.TestCase):
                 self._run_auto_patch(future_patch_options)
 
         stderr = buf.getvalue()
-        self.assertIn("newer than highest validated version '0.17.0'", stderr)
-        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn("Using nearest compatible patch set '0.17.0'", stderr)
         self.assertIn(self.EARS_LOG, stderr)
 
     def test_auto_patch_normalizes_vllm_ascend_alias_before_enable(self):

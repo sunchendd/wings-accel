@@ -20,6 +20,10 @@ export WINGS_ENGINE_PATCH_OPTIONS='{"vllm-ascend": {"version": "0.17.0", "featur
 python -m vllm.entrypoints.openai.api_server --model /path/to/model ...
 ```
 
+## 相关文档
+
+- `docs/speed-bench-vllm-bench-guide.md`：SPEED-Bench + `vllm bench serve` 的实际接入、依赖安装、throughput 与 `math/coding` 单测示例
+
 ## 最终交付目录
 
 执行 `make build` 或 `bash build/build.sh` 后，`build/output/` 中包含以下交付件：

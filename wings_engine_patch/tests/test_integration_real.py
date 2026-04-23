@@ -228,8 +228,8 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("ok", stdout, "Expected 'ok' in stdout")
 
-    def test_auto_patch_old_version_fails_clearly(self):
-        code = "print('should_not_reach')"
+    def test_auto_patch_old_version_uses_default_patch_set(self):
+        code = "print('startup_probe')"
         rc, stdout, stderr = _run_python(
             code,
             env_extra={
@@ -239,9 +239,11 @@ class TestAutoPatchSubprocess(unittest.TestCase):
                 )
             },
         )
-        self.assertNotEqual(rc, 0, "Historical unsupported versions should fail the process")
-        self.assertNotIn("should_not_reach", stdout)
-        self.assertIn("Historical versions are not supported", stderr)
+        self.assertEqual(rc, 0, f"Older-than-all fallback should succeed. stdout={stdout!r} stderr={stderr!r}")
+        self.assertIn("startup_probe", stdout)
+        self.assertIn("older than the minimum validated version", stderr)
+        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
 
     def test_auto_patch_future_version_warns_and_falls_back(self):
         code = "print('startup_probe')"
@@ -256,8 +258,7 @@ class TestAutoPatchSubprocess(unittest.TestCase):
         )
         self.assertEqual(rc, 0, f"Future-version fallback should succeed. stdout={stdout!r} stderr={stderr!r}")
         self.assertIn("startup_probe", stdout)
-        self.assertIn("newer than highest validated version", stderr)
-        self.assertIn("Trying default patch set '0.17.0'", stderr)
+        self.assertIn("Using nearest compatible patch set '0.17.0'", stderr)
         self.assertIn(self.ADAPTIVE_DRAFT_LOG, stderr)
 
     def test_auto_patch_ears_logs_on_startup(self):

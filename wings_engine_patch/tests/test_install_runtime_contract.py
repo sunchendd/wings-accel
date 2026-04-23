@@ -140,16 +140,16 @@ def test_future_vllm_version_warns_and_preserves_requested_public_features(monke
     )
     monkeypatch.setattr(install_module, "install_runtime_dependencies", lambda dry_run=False: None)
 
-    def fake_install_engine(engine_name, version, features, dry_run=False):
-        calls.append((engine_name, version, features, dry_run))
+    def fake_install_engine(engine_name, version, features, dry_run=False, **kwargs):
+        calls.append((engine_name, version, features, dry_run, kwargs.get("display_engine_name")))
 
     monkeypatch.setattr(install_module, "install_engine", fake_install_engine)
 
     with suppress(SystemExit):
         install_module.main()
 
-    assert calls == [("vllm", "0.17.0", ["ears"], True)]
-    assert "newer than the highest validated version" in captured_stderr.getvalue()
+    assert calls == [("vllm", "0.17.0", ["ears"], True, "vllm")]
+    assert "Using nearest compatible version '0.17.0'" in captured_stderr.getvalue()
 
 
 def test_vllm_ascend_rc1_version_resolves_exactly():
@@ -165,15 +165,17 @@ def test_vllm_ascend_rc1_version_resolves_exactly():
     assert set(version_spec["features"].keys()) == {"ears", "draft_model"}
 
 
-def test_vllm_ascend_stable_tag_is_rejected():
+def test_vllm_ascend_stable_tag_uses_nearest_lower_rc1():
     manifest_data = install_module.load_supported_features()
 
-    with pytest.raises(ValueError, match="not a validated patched version"):
-        install_module.resolve_version(
-            "vllm-ascend",
-            "0.17.0",
-            manifest_data["engines"]["vllm-ascend"],
-        )
+    resolved_version, version_spec = install_module.resolve_version(
+        "vllm-ascend",
+        "0.17.0",
+        manifest_data["engines"]["vllm-ascend"],
+    )
+
+    assert resolved_version == "0.17.0rc1"
+    assert set(version_spec["features"].keys()) == {"ears", "draft_model"}
 
 
 def test_install_runtime_dependencies_installs_wrapt_packaging_then_best_effort_arctic(

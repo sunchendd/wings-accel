@@ -119,7 +119,7 @@ class TestResolveVersion(unittest.TestCase):
         self.assertEqual(ver, "1.0.0")
         self.assertFalse(spec["is_default"])
 
-    def test_future_version_warns_and_falls_back_to_default(self):
+    def test_future_version_uses_nearest_compatible_registered_version(self):
         captured = io.StringIO()
         orig = sys.stderr
         sys.stderr = captured
@@ -129,15 +129,21 @@ class TestResolveVersion(unittest.TestCase):
             sys.stderr = orig
         self.assertEqual(ver, "2.0.0")
         self.assertTrue(spec["is_default"])
-        self.assertIn("newer than the highest validated version", captured.getvalue())
+        self.assertIn("Using nearest compatible version '2.0.0'", captured.getvalue())
 
-    def test_old_version_raises(self):
-        with self.assertRaises(ValueError) as ctx:
-            resolve_version("myengine", "0.9.0", self._spec())
-        self.assertIn("older than the minimum supported patched version", str(ctx.exception))
-        self.assertIn("Historical versions are not supported", str(ctx.exception))
+    def test_lower_than_all_registered_versions_uses_nearest_higher_registered_version(self):
+        captured = io.StringIO()
+        orig = sys.stderr
+        sys.stderr = captured
+        try:
+            ver, spec = resolve_version("myengine", "0.9.0", self._spec())
+        finally:
+            sys.stderr = orig
+        self.assertEqual(ver, "1.0.0")
+        self.assertFalse(spec["is_default"])
+        self.assertIn("Using nearest compatible version '1.0.0'", captured.getvalue())
 
-    def test_unvalidated_gap_version_raises(self):
+    def test_unvalidated_gap_version_uses_nearest_lower_registered_version(self):
         spec = {
             "versions": {
                 "1.0.0": {"is_default": False, "features": {"f1": {}}},
@@ -145,9 +151,16 @@ class TestResolveVersion(unittest.TestCase):
                 "3.0.0": {"is_default": False, "features": {"f3": {}}},
             }
         }
-        with self.assertRaises(ValueError) as ctx:
-            resolve_version("myengine", "2.5.0", spec)
-        self.assertIn("not a validated patched version", str(ctx.exception))
+        captured = io.StringIO()
+        orig = sys.stderr
+        sys.stderr = captured
+        try:
+            ver, resolved_spec = resolve_version("myengine", "2.5.0", spec)
+        finally:
+            sys.stderr = orig
+        self.assertEqual(ver, "2.0.0")
+        self.assertEqual(resolved_spec, spec["versions"]["2.0.0"])
+        self.assertIn("Using nearest compatible version '2.0.0'", captured.getvalue())
 
     def test_exact_match_preferred_over_default(self):
         # Both 1.0.0 and 2.0.0 exist; requesting 1.0.0 should return 1.0.0,
@@ -252,11 +265,11 @@ class TestSupportedFeatureManifest(unittest.TestCase):
         self.assertEqual(ver, "0.17.0rc1")
         self.assertTrue(spec["is_default"])
 
-    def test_manifest_rejects_vllm_ascend_stable_tag_without_rc1(self):
+    def test_manifest_maps_vllm_ascend_stable_tag_to_nearest_lower_rc1(self):
         data = load_supported_features()
-        with self.assertRaises(ValueError) as ctx:
-            resolve_version("vllm-ascend", "0.17.0", data["engines"]["vllm-ascend"])
-        self.assertIn("not a validated patched version", str(ctx.exception))
+        ver, spec = resolve_version("vllm-ascend", "0.17.0", data["engines"]["vllm-ascend"])
+        self.assertEqual(ver, "0.17.0rc1")
+        self.assertTrue(spec["is_default"])
 
 
 class TestCurrentVllmVersionPolicy(unittest.TestCase):
@@ -273,11 +286,11 @@ class TestCurrentVllmVersionPolicy(unittest.TestCase):
         self.assertEqual(ver, "0.17.0")
         self.assertTrue(spec["is_default"])
 
-    def test_manifest_historical_version_rejects_older_vllm_release(self):
+    def test_manifest_historical_version_uses_default_vllm_release(self):
         data = load_supported_features()
-        with self.assertRaises(ValueError) as ctx:
-            resolve_version("vllm", "0.12.0", data["engines"]["vllm"])
-        self.assertIn("Historical versions are not supported", str(ctx.exception))
+        ver, spec = resolve_version("vllm", "0.12.0", data["engines"]["vllm"])
+        self.assertEqual(ver, "0.17.0")
+        self.assertTrue(spec["is_default"])
 
 
 def test_get_packaging_version_types_requires_runtime_deps():

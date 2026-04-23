@@ -102,13 +102,8 @@ class VersionSelection:
     resolution_kind: str
 
 
-def _get_default_version_spec(inference_engine: str, engine_specs: dict) -> tuple[str, dict]:
-    for version_str, specs in engine_specs.items():
-        if specs.get("is_default", False):
-            return version_str, specs
-    raise UnsupportedVersionError(
-        f"Engine '{inference_engine}' has no default patch version configured."
-    )
+def _uses_compatibility_version(selection: VersionSelection) -> bool:
+    return selection.resolution_kind != "exact"
 
 
 def _parse_registered_versions(
@@ -151,44 +146,39 @@ def _select_version(inference_engine: str, requested_version: str, engine_specs:
             f"Engine '{inference_engine}' has no registered patch versions."
         )
 
-    min_supported, min_version_str, _ = parsed_versions[0]
-    max_supported, max_version_str, _ = parsed_versions[-1]
-
-    if (
-        not requested.is_prerelease
-        and max_supported.is_prerelease
-        and requested.release == max_supported.release
-    ):
-        raise UnsupportedVersionError(
-            f"Requested version '{requested_version}' for engine '{inference_engine}' is not a "
-            f"validated patched version. Supported versions: {sorted(engine_specs.keys())}."
-        )
-
-    if requested < min_supported:
-        raise UnsupportedVersionError(
-            f"Requested version '{requested_version}' for engine '{inference_engine}' is older "
-            f"than the minimum supported patched version '{min_version_str}'. Historical versions "
-            "are not supported."
-        )
-
-    if requested > max_supported:
-        resolved_version, ver_specs = _get_default_version_spec(inference_engine, engine_specs)
-        print(
-            f"[Wings Engine Patch] Warning: Requested version '{requested_version}' is newer than "
-            f"highest validated version '{max_version_str}' for engine '{inference_engine}'. "
-            f"Trying default patch set '{resolved_version}'.",
-            file=sys.stderr,
-        )
+    lower_or_equal_versions = [
+        (parsed_version, version_str, specs)
+        for parsed_version, version_str, specs in parsed_versions
+        if parsed_version <= requested
+    ]
+    if lower_or_equal_versions:
+        _, resolved_version, ver_specs = lower_or_equal_versions[-1]
+        if resolved_version != requested_version:
+            print(
+                f"[Wings Engine Patch] Warning: Requested version '{requested_version}' for engine "
+                f"'{inference_engine}' is not registered exactly. Using nearest compatible patch set "
+                f"'{resolved_version}'.",
+                file=sys.stderr,
+            )
         return VersionSelection(
             requested_version=requested_version,
             resolved_version=resolved_version,
             ver_specs=ver_specs,
-            resolution_kind="future_fallback",
+            resolution_kind="compatible_match",
         )
 
-    raise UnsupportedVersionError(
-        f"Requested version '{requested_version}' for engine '{inference_engine}' is not a "
-        f"validated patched version. Supported versions: {sorted(engine_specs.keys())}."
+    _, resolved_version, ver_specs = parsed_versions[0]
+    print(
+        f"[Wings Engine Patch] Warning: Requested version '{requested_version}' for engine "
+        f"'{inference_engine}' is not registered exactly. Using nearest compatible patch set "
+        f"'{resolved_version}'.",
+        file=sys.stderr,
+    )
+    return VersionSelection(
+        requested_version=requested_version,
+        resolved_version=resolved_version,
+        ver_specs=ver_specs,
+        resolution_kind="compatible_match",
     )
 
 
@@ -273,10 +263,10 @@ def enable(inference_engine: str, features: List[str], version: str) -> List[Tup
     try:
         _ensure_features_loaded(ver_specs)
     except ImportError as e:
-        if selection.resolution_kind == "future_fallback":
+        if _uses_compatibility_version(selection):
             raise ForwardCompatibilityPatchError(
-                f"Requested version '{version}' is newer than the validated patch set. "
-                f"Tried default patch set '{used_version}', but loading patches failed: {e}"
+                f"Requested version '{version}' resolved to compatible patch set "
+                f"'{used_version}', but loading patches failed: {e}"
             ) from e
         print(f"[Wings Engine Patch] Error loading patches for {inference_engine}@{used_version}: {e}", file=sys.stderr)
         return failures
@@ -308,11 +298,11 @@ def enable(inference_engine: str, features: List[str], version: str) -> List[Tup
             print(f"[Wings Engine Patch] Error executing patch {patch_name}: {e}", file=sys.stderr)
             failures.append((patch_name, e))
 
-    if selection.resolution_kind == "future_fallback" and failures:
+    if _uses_compatibility_version(selection) and failures:
         failed_patch_names = ", ".join(patch_name for patch_name, _ in failures)
         raise ForwardCompatibilityPatchError(
-            f"Requested version '{version}' is newer than the validated patch set. "
-            f"Tried default patch set '{used_version}', but patching failed: {failed_patch_names}"
+            f"Requested version '{version}' resolved to compatible patch set "
+            f"'{used_version}', but patching failed: {failed_patch_names}"
         ) from failures[0][1]
 
     return failures
